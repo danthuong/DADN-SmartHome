@@ -1,0 +1,51 @@
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual environment
+venv/
+.env
+.env.*
+!.env.example
+
+# ===============================
+# AI Model Weights
+# ===============================
+*.pt
+*.pth
+*.onnx
+*.dat
+
+ai_server/models/*
+!ai_server/models/.gitkeep
+
+# ===============================
+# Database
+# ===============================
+ai_server/database/*.db
+
+# ===============================
+# ESP32 / Microcontroller
+# ===============================
+*.bin
+*.elf
+*.hex
+*.pyc
+
+# ===============================
+# Android
+# ===============================
+mobile_app/.gradle/
+mobile_app/build/
+mobile_app/app/build/
+
+# ===============================
+# OS
+# ===============================
+.DS_Store
+Thumbs.db
