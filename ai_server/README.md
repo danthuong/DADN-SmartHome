@@ -314,7 +314,7 @@ python -m test.test_register_face
 ### 📌 Quy trình hoạt động:
 
 1. Hệ thống sẽ yêu cầu bạn **nhập tên folder**.
-2. AI Server sẽ đọc toàn bộ ảnh trong thư mục:
+2. Model sẽ đọc toàn bộ ảnh trong thư mục:
 
 ```
 <tên_folder>/
@@ -328,7 +328,7 @@ python -m test.test_register_face
    - **Tên (name)**
    - **Location**
 6. Sau khi nhập thông tin:
-   - AI Server trích xuất embedding.
+   - Model trích xuất embedding.
    - Lưu embedding + metadata vào Database.
 
 ---
@@ -345,7 +345,6 @@ python -m test.test_register_face
 💡 Lưu ý:
 
 - Nếu trong một ảnh có nhiều khuôn mặt, hệ thống sẽ yêu cầu nhập thông tin cho từng khuôn mặt.
-- Đảm bảo AI Server đang chạy trước khi thực hiện bước này.
 - Chỉ cần nhập tên folder, không cần nhập full path.
 - Sau khi đăng ký thành công, dữ liệu sẽ được dùng cho realtime recognition.
 
@@ -486,4 +485,4 @@ python -m modules.face_recognition.backend.CAM_backend --location house_A
 
 # ✍️ Author
 
-**Written by: NguyenPhanTuanDuy**
+**Written by: nguyenphantuanduy**
