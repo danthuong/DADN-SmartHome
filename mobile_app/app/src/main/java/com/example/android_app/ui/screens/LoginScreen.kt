@@ -10,16 +10,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.android_app.ui.theme.PrimaryPurple
-import com.example.android_app.ui.theme.BackgroundBlack
+import com.example.android_app.data.FakeAuthRepository
+import com.example.android_app.data.User
+import com.example.android_app.utils.AppStrings // Import bộ chữ
 
 @Composable
 fun LoginScreen(
-    onLoginSuccess: (String) -> Unit,
-    onNavigateToSignUp: () -> Unit // THÊM THAM SỐ NÀY
+    strings: AppStrings, // THÊM THAM SỐ NÀY
+    onLoginSuccess: (User) -> Unit,
+    onNavigateToSignUp: () -> Unit
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+
+    val authRepo = remember { FakeAuthRepository() }
 
     Column(
         modifier = Modifier
@@ -30,27 +35,27 @@ fun LoginScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "Smart Home",
+            text = "Smart Home",
             color = MaterialTheme.colorScheme.onBackground,
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold
         )
-        Text("Hệ thống IoT & AI", color = Color.Gray)
+        Text(text = "AI & IoT Security System", color = Color.Gray)
 
         Spacer(modifier = Modifier.height(48.dp))
 
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
-            label = {Text("Tên đăng nhập")},
+            label = { Text(strings.username) }, // Dùng strings.username
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = com.example.android_app.ui.theme.PrimaryPurple,
+                focusedTextColor = MaterialTheme.colorScheme.primary,
                 unfocusedTextColor = Color.Gray,
-                focusedBorderColor = com.example.android_app.ui.theme.PrimaryPurple,
-                focusedLabelColor = com.example.android_app.ui.theme.PrimaryPurple,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedLabelColor = MaterialTheme.colorScheme.primary,
                 unfocusedLabelColor = Color.Gray,
-                cursorColor = PrimaryPurple
+                cursorColor = MaterialTheme.colorScheme.primary
             )
         )
 
@@ -59,31 +64,43 @@ fun LoginScreen(
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Mật khẩu") },
+            label = { Text(strings.password) }, // Dùng strings.password
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = com.example.android_app.ui.theme.PrimaryPurple,
+                focusedTextColor = MaterialTheme.colorScheme.primary,
                 unfocusedTextColor = Color.Gray,
-                focusedBorderColor = com.example.android_app.ui.theme.PrimaryPurple,
-                focusedLabelColor = com.example.android_app.ui.theme.PrimaryPurple,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedLabelColor = MaterialTheme.colorScheme.primary,
                 unfocusedLabelColor = Color.Gray,
-                cursorColor = PrimaryPurple
+                cursorColor = MaterialTheme.colorScheme.primary
             )
         )
 
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
-            onClick = { if(username.isNotEmpty()) onLoginSuccess(username) },
+            onClick = {
+                val user = authRepo.login(username, password)
+                if(user != null) {
+                    onLoginSuccess(user)
+                } else {
+                    // Bạn có thể thêm câu này vào AppStrings nếu muốn dịch luôn lỗi
+                    errorMessage = strings.errorPass
+                }
+            },
             modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = com.example.android_app.ui.theme.PrimaryPurple)
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
-            Text("Đăng nhập", fontWeight = FontWeight.Bold)
+            Text(text = strings.login, fontWeight = FontWeight.Bold) // Dùng strings.login
         }
 
         TextButton(onClick = onNavigateToSignUp) {
-            Text("Không có tài khoản? Đăng kí tại đây", color = com.example.android_app.ui.theme.PrimaryPurple)
+            Text(text = strings.signUpAsk, color = MaterialTheme.colorScheme.primary) // Dùng strings.signUpAsk
+        }
+
+        if (errorMessage.isNotEmpty()) {
+            Text(errorMessage, color = Color.Red, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
