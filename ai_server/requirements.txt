@@ -1,0 +1,10 @@
+insightface
+onnxruntime
+opencv-python
+numpy
+deep-sort-realtime
+torch
+fastapi
+uvicorn
+python-multipart
+pydantic
