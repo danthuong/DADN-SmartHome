@@ -1,120 +1,182 @@
 package com.example.android_app.ui.screens
 
+import android.content.Context
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.NightsStay
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-// Chú ý: Đảm bảo các file theme này đã tồn tại trong project của bạn
-import com.example.android_app.ui.theme.BackgroundBlack
-import com.example.android_app.ui.theme.CardGray
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.android_app.data.User
 import com.example.android_app.ui.theme.PrimaryPurple
 import com.example.android_app.utils.sendNotification
 import java.util.Calendar
+import coil.compose.AsyncImage
+import com.example.android_app.utils.AppStrings
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardHeader(userName: String, onProfileClick: () -> Unit) {
+fun DashboardScreen(
+    user: User,
+    strings: AppStrings,
+    onLogout: () -> Unit,
+    onProfileClick: () -> Unit,
+    onSettingsClick: () -> Unit // Thêm callback cho settings
+) {
+    val context = LocalContext.current
+    val sharedPref = remember { context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE) }
+
+    // Đọc Avatar từ SharedPreferences (Đảm bảo đồng bộ khi quay lại từ Profile)
+    val savedAvatarUri = sharedPref.getString("avatar_uri", null)?.let { Uri.parse(it) }
+
+    // Logic thời tiết dựa trên giờ hệ thống
     val calendar = Calendar.getInstance()
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
-    // Chọn Icon theo giờ thực tế
-    val weatherIcon = when (hour) {
-        in 6..17 -> {
-            Icons.Default.WbSunny // Ban ngày
-        }
+    val weatherIcon = if (hour in 6..17) Icons.Default.WbSunny else Icons.Default.NightsStay
+    val weatherText = if (hour in 6..17) strings.sun else strings.clear
 
-        else -> Icons.Default.NightsStay // Ban đêm
-    }
-    val weatherText = if (hour in 6..17) "Trời nắng" else "Trời quang"
+    // Danh sách phòng giả lập (Mục 8)
+    val rooms = listOf(strings.roomLiving, strings.roomBed, strings.roomKitchen, strings.Garden)
+    var selectedRoom by remember { mutableStateOf(strings.roomLiving) }
 
-    Card(
+    Scaffold(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(180.dp),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = PrimaryPurple.copy(alpha = 0.9f))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            .fillMaxSize()
+            .statusBarsPadding(),
+        // 7. Thanh công cụ phía trên (Top Bar)
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("YOLO HOME", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold) },
+                navigationIcon = {
+                    IconButton(onClick = onProfileClick) {
+                        if (savedAvatarUri != null) {
+                            // Nếu đã có ảnh
+                            coil.compose.AsyncImage(
+                                model = savedAvatarUri,
+                                contentDescription = strings.profileAva,
+                                modifier = Modifier
+                                    .size(36.dp) // Tăng nhẹ kích thước cho dễ nhìn
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            // NẾU CHƯA CÓ ẢNH - FIX LỖI Ở ĐÂY
+                            Surface(
+                                modifier = Modifier.size(36.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant // Màu xám nhạt/tối tùy theme
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    // CHỈ để padding nhỏ (ví dụ 6.dp) để icon nằm gọn trong vòng tròn
+                                    modifier = Modifier.padding(6.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                },
+                actions = {
+                    // Nút Settings ở góc phải phía trên
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(Icons.Default.Settings, contentDescription = null)
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        },
+        // 9. Nút '+' hình tròn ở giữa cuối màn hình
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { /* Logic thêm thiết bị */ },
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.surface
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+            }
+        },
+        floatingActionButtonPosition = FabPosition.Center
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .statusBarsPadding()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 16.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("CHÀO MỪNG ĐẾN SMART HOME", color = Color.White.copy(alpha = 0.8f))
-                Text(userName, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                //Weather Row (Giả lập lấy từ cảm biến DHT20)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(weatherIcon, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(weatherText, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            // 1. Card Welcome mới (Gọn gàng hơn)
+            Card(
+                modifier = Modifier.fillMaxWidth().height(140.dp),
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(strings.welcome, style = MaterialTheme.typography.bodyLarge)
+                    Text(user.fullName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(weatherIcon, contentDescription = null, tint = Color(0xFFFFB300), modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("28°C - $weatherText", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
 
-            // Avatar Người dùng
-            IconButton(
-                onClick = onProfileClick,
-                modifier = Modifier.size(64.dp).background(Color.White.copy(alpha = 0.2f), CircleShape)
-            ) {
-                Icon(Icons.Default.Person, contentDescription = "Profile", tint = Color.White, modifier = Modifier.size(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 8. Lựa chọn gian phòng (LazyRow)
+            Text(strings.room, color = Color.Gray, style = MaterialTheme.typography.labelLarge)
+            Spacer(modifier = Modifier.height(8.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(rooms) { room ->
+                    FilterChip(
+                        selected = selectedRoom == room,
+                        onClick = { selectedRoom = room },
+                        label = { Text(room) },
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                }
             }
-        }
-    }
-}
 
-@Composable
-fun DashboardScreen(userName: String, onLogout: () -> Unit, onProfileClick: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+            Spacer(modifier = Modifier.height(24.dp))
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .padding(16.dp)
-    ) {
-        DashboardHeader(userName = userName, onProfileClick = onProfileClick)
+            // Thông số cảm biến (Cố định hoặc lọc theo phòng)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                SensorCard(strings.temp, "28°C", modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(16.dp))
+                SensorCard(strings.lit, "150 Lux", modifier = Modifier.weight(1f))
+            }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-        // Khu vực hiển thị thông số (Nhiệt độ/Ánh sáng)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SensorCard("Nhiệt độ", "28°C", modifier = Modifier.weight(1f))
-            Spacer(modifier = Modifier.width(16.dp))
-            SensorCard("Ánh sáng", "150 Lux", modifier = Modifier.weight(1f))
-        }
+            Text("${strings.devicesIn} ${selectedRoom.uppercase()}", color = Color.Gray, style = MaterialTheme.typography.labelLarge)
+            Spacer(modifier = Modifier.height(12.dp))
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text("THIẾT BỊ", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Khu vực điều khiển thiết bị
-        DeviceControlCard("Đèn", icon = Icons.Default.Lightbulb)
-        Spacer(modifier = Modifier.height(16.dp))
-        DeviceControlCard("Quạt", icon = Icons.Default.Air)
-
-        Spacer(modifier = Modifier.height(30.dp))
-
-        Button(
-            onClick = { sendNotification(context, "Cảnh báo!", "Có người lạ trước cửa!") },
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple)
-        ) {
-            Text("Test Notification")
+            // 1. Sửa lỗi Card Device không đổi màu (Dùng surfaceVariant)
+            DeviceControlCard(strings.led, icon = Icons.Default.Lightbulb)
+            Spacer(modifier = Modifier.height(12.dp))
+            DeviceControlCard(strings.fan, icon = Icons.Default.Air)
         }
     }
 }
@@ -123,52 +185,45 @@ fun DashboardScreen(userName: String, onLogout: () -> Unit, onProfileClick: () -
 fun SensorCard(title: String, value: String, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        shape = RoundedCornerShape(16.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), // Đổi màu card đồng bộ
+        shape = RoundedCornerShape(20.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(title, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
-            Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineMedium)
+            Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 12.sp)
+            Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
 fun DeviceControlCard(name: String, icon: ImageVector) {
-    // Sửa lỗi: Cần import androidx.compose.runtime.setValue để dùng 'by'
     var isOn by remember { mutableStateOf(false) }
-
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant )
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Icon tự đổi màu theo theme và trạng thái
             Icon(
-                imageVector = icon,
+                icon,
                 contentDescription = null,
-                tint = if (isOn) PrimaryPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                tint = if (isOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(28.dp)
             )
             Spacer(modifier = Modifier.width(16.dp))
-            Text(name, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(name, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+
+            // Switch tự đổi màu thumb trắng cho nổi bật
             Switch(
                 checked = isOn,
                 onCheckedChange = { isOn = it },
                 colors = SwitchDefaults.colors(
-                    // Khi đang BẬT
-                    checkedThumbColor = Color.White,           // Nút tròn màu trắng (cho nổi bật)
-                    checkedTrackColor = PrimaryPurple, // Thanh trượt màu tím/xanh đậm
-
-                    // Khi đang TẮT
-                    uncheckedThumbColor = Color.Gray,          // Nút tròn màu xám
-                    uncheckedTrackColor = Color.LightGray.copy(alpha = 0.5f), // Thanh trượt xám nhạt
-
-                    // Màu viền khi tắt (tùy chọn)
-                    uncheckedBorderColor = Color.Gray
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary
                 )
             )
         }

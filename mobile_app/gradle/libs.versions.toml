@@ -14,6 +14,9 @@ uiGraphics = "1.10.3"
 material3 = "1.4.0"
 foundation = "1.10.3"
 ui = "1.10.3"
+firebaseFirestoreKtx = "26.1.0"
+#google-services = "4.4.2"
+#firebase-bom = "33.1.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,8 +40,10 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 androidx-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
+#firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase-bom" }
+#firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-
+#google-services = { id = "com.google.gms.google-services", version.ref = "google-services" }

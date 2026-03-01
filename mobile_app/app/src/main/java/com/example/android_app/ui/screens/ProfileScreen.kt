@@ -1,5 +1,6 @@
 package com.example.android_app.ui.screens
 
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,30 +22,58 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 // Chú ý: Đảm bảo các file theme này đã tồn tại trong project của bạn
 import com.example.android_app.ui.theme.BackgroundBlack
 import com.example.android_app.ui.theme.CardGray
 import com.example.android_app.ui.theme.PrimaryPurple
 import com.example.android_app.R
+import com.example.android_app.data.User
+import com.example.android_app.utils.AppStrings
+import com.example.android_app.utils.ImageUtils
 import com.example.android_app.utils.sendNotification
 
 @Composable
-fun ProfileScreen(userName: String, onBack: () -> Unit, onLogout: () -> Unit) {
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+fun ProfileScreen(user: User, strings: AppStrings, onBack: () -> Unit, onLogout: () -> Unit) {
     val context = LocalContext.current
-
+    val sharedPref = remember { context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE) }
+    var imageUri by remember {
+        mutableStateOf(sharedPref.getString("avatar_uri", null)?.let { Uri.parse(it) })
+    }
+    // Launcher: Chọn từ Album
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            imageUri = it
+            sharedPref.edit().putString("avatar_uri", it.toString()).apply()
+        }
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         imageUri = uri
     }
 
+    // Launcher: Chụp bằng Camera
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        bitmap?.let {
+            val uri = ImageUtils.saveBitmapToInternalStorage(context, it)
+            imageUri = uri
+            sharedPref.edit().putString("avatar_uri", uri.toString()).apply()
+        }
+    }
+
+    var showDialog by remember { mutableStateOf(false) }
+
     Column(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(24.dp)
+            .statusBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = null) }
-            Text("Profile", style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+            Text(strings.profile, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -55,40 +84,75 @@ fun ProfileScreen(userName: String, onBack: () -> Unit, onLogout: () -> Unit) {
             if (imageUri != null) {
                 AsyncImage(
                     model = imageUri,
-                    contentDescription = null,
-                    modifier = Modifier.size(120.dp).clip(CircleShape),
+                    contentDescription = strings.ava,
+                    modifier = Modifier
+                        .size(140.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentScale = ContentScale.Crop
                 )
             } else {
                 // THAY THẾ DÒNG NÀY: Dùng Icon hệ thống thay vì R.drawable nếu bạn chưa có ảnh
                 Surface(
-                    modifier = Modifier.size(120.dp),
+                    modifier = Modifier.size(140.dp),
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AccountCircle, // Dùng icon có sẵn
+                        imageVector = Icons.Default.Person, // Dùng icon có sẵn
                         contentDescription = null,
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier.padding(30.dp),
                         tint = PrimaryPurple
                     )
                 }
             }
 
             IconButton(
-                onClick = { launcher.launch("image/*") },
-                modifier = Modifier.size(40.dp).background(PrimaryPurple, CircleShape)
+                onClick = { showDialog = true },
+                modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
             ) {
                 Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
+
+        // Bảng chọn nguồn ảnh
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = { showDialog = false },
+                title = { Text(strings.changeAva) },
+                text = { Text(strings.PicFrom) },
+                confirmButton = {
+                    TextButton(onClick = { galleryLauncher.launch("image/*"); showDialog = false }) { Text(strings.lib) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { cameraLauncher.launch(null); showDialog = false }) { Text(strings.cam) }
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // HIỂN THỊ THÔNG TIN USER (Họ tên & Username)
+        Text(
+            text = user.fullName,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            text = "@${user.username}",
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        Spacer(modifier = Modifier.height(40.dp))
 //
 //        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
 //            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = null) }
 //            Text("Thông tin cá nhân", style = MaterialTheme.typography.titleLarge)
 //        }
 
-        Spacer(modifier = Modifier.height(32.dp))
+//        Spacer(modifier = Modifier.height(32.dp))
 
         // Avatar to
 //        Surface(modifier = Modifier.size(120.dp), shape = CircleShape, color = CardGray) {
@@ -102,9 +166,7 @@ fun ProfileScreen(userName: String, onBack: () -> Unit, onLogout: () -> Unit) {
 //        Spacer(modifier = Modifier.height(32.dp))
 
         // Gọi đúng tên hàm là ProfileItem (hoặc đổi tên bên dưới thành SettingItem)
-        ProfileItem(Icons.Default.Lock, "Đổi mật khẩu")
-        ProfileItem(Icons.Default.Language, "Ngôn ngữ")
-        ProfileItem(Icons.Default.Notifications, "Lịch sử cảnh báo")
+        ProfileItem(Icons.Default.Notifications, strings.warningHistory)
 
 //        Spacer(modifier = Modifier.weight(1f))
 
@@ -116,10 +178,12 @@ fun ProfileScreen(userName: String, onBack: () -> Unit, onLogout: () -> Unit) {
 
         // Các nút cài đặt khác
         Button(
-            onClick = onLogout, // Gọi hàm logout đã định nghĩa ở AppNavigation
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            onClick = onLogout,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+            shape = RoundedCornerShape(16.dp)
         ) {
-            Text("Đăng xuất")
+            Text(strings.logout, fontWeight = FontWeight.Bold,fontSize = 20.sp)
         }
     }
 }
