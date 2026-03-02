@@ -57,6 +57,16 @@ data class AppStrings(
     val Light: String,
     val Dark: String,
     val Sys: String,
+    val presets: String,
+    val createPreset: String,
+    val editPreset: String,
+    val deviceNameDefault: String, // Tên mặc định
+    val color: String,
+    val speed: String,
+    val brightness: String,
+    val osc: String, // Chế độ quay
+    val saveSuccess: String,
+    val enterPresetName: String
 )
 
 // Dữ liệu Tiếng Việt
@@ -110,7 +120,16 @@ val VietnameseStrings = AppStrings(
     Light = "Sáng",
     Dark = "Tối",
     Sys = "Hệ thống",
-
+    presets = "Ngữ cảnh (Presets)",
+    createPreset = "Tạo ngữ cảnh",
+    editPreset = "Chỉnh sửa ngữ cảnh",
+    deviceNameDefault = "Thiết bị",
+    color = "Màu sắc",
+    speed = "Tốc độ gió",
+    brightness = "Độ sáng",
+    osc = "Chế độ quay",
+    saveSuccess = "Đã lưu thành công",
+    enterPresetName = "Nhập tên ngữ cảnh (VD: Đi ngủ)"
 )
 
 // Dữ liệu Tiếng Anh
@@ -164,4 +183,14 @@ val EnglishStrings = AppStrings(
     Light = "Light",
     Dark = "Dark",
     Sys = "System",
+    presets = "Presets (Scenes)",
+    createPreset = "Create Preset",
+    editPreset = "Edit Preset",
+    deviceNameDefault = "Device",
+    color = "Color",
+    speed = "Fan Speed",
+    brightness = "Brightness",
+    osc = "Oscillation",
+    saveSuccess = "Saved successfully",
+    enterPresetName = "Preset Name (e.g. Sleep)"
     )
