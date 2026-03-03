@@ -102,7 +102,7 @@ fun ProfileScreen(user: User, strings: AppStrings, onBack: () -> Unit, onLogout:
                         imageVector = Icons.Default.Person, // Dùng icon có sẵn
                         contentDescription = null,
                         modifier = Modifier.padding(30.dp),
-                        tint = PrimaryPurple
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
