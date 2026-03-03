@@ -4,7 +4,7 @@ import time
 # IMPORT CÁC MODULE VÀO ĐÂY
 from mqtt_client import setup_mqtt
 from modules.human_detection.human_detector import HumanDetector
-
+from database.db_manager import DatabaseManager 
 # ==========================================
 # 1. CẤU HÌNH THÔNG SỐ ADAFRUIT IO
 # ==========================================
@@ -33,6 +33,9 @@ if not cap.isOpened():
 last_state = -1
 last_time = time.time()
 
+print("[MAIN] Khởi tạo Database...")
+db = DatabaseManager()
+
 print("[MAIN] Hệ thống bắt đầu quét. Nhấn phím 'q' để tắt.")
 
 # ==========================================
@@ -57,7 +60,7 @@ while True:
             client.publish(AIO_HUMAN_DETECT_FEED, trang_thai_nguoi)
         except Exception as e:
             print(f"[LỖI] Không gửi được dữ liệu: {e}")
-            
+        db.log_environment(presence=trang_thai_nguoi)
         last_state = trang_thai_nguoi
         last_time = current_time
 
