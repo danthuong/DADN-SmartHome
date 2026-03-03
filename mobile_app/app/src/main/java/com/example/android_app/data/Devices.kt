@@ -10,7 +10,8 @@ sealed class SmartDevice(
     open val id: String,
     open val name: String,
     open val type: DeviceType,
-    open val isOn: Boolean
+    open val isOn: Boolean,
+    open val roomID: String
 )
 
 data class SmartLight(
@@ -18,16 +19,19 @@ data class SmartLight(
     override val name: String,
     override val isOn: Boolean,
     val brightness: Float, // 0-100
-    val color: Int         // Color Int
-) : SmartDevice(id, name, DeviceType.LIGHT, isOn)
+    val color: Int,         // Color Int
+    override val roomID: String
+) : SmartDevice(id, name, DeviceType.LIGHT, isOn, roomID)
 
 data class SmartFan(
     override val id: String,
     override val name: String,
     override val isOn: Boolean,
     val speed: Float,      // 1-3
-    val isOscillating: Boolean
-) : SmartDevice(id, name, DeviceType.FAN, isOn)
+    val isOscillating: Boolean,
+    val isTracking: Boolean = false,
+    override val roomID: String
+) : SmartDevice(id, name, DeviceType.FAN, isOn, roomID)
 
 
 // --- 2. MODEL CHO PRESET (CẤU HÌNH MONG MUỐN) ---
@@ -45,7 +49,8 @@ data class LightConfig(
 data class FanConfig(
     val isOn: Boolean,
     val speed: Float,
-    val isOscillating: Boolean
+    val isOscillating: Boolean,
+    val isTracking: Boolean = false
 ) : DeviceConfig
 
 // Một Preset chứa tên và Map: ID thiết bị -> Cấu hình muốn áp dụng
@@ -54,5 +59,6 @@ data class Preset(
     val name: String,
     val icon: String = "✨",
     // Map<DeviceId, Config>
-    val deviceConfigs: Map<String, DeviceConfig>
+    val deviceConfigs: Map<String, DeviceConfig>,
+    val roomID: String
 )
