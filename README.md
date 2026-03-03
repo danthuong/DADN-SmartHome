@@ -3,7 +3,7 @@
 Dự án xây dựng hệ thống nhà thông minh tích hợp trí tuệ nhân tạo (AI) chạy trên Edge Server để phân tích hình ảnh/video theo thời gian thực. Hệ thống kết hợp với mô hình phần cứng IoT (Yolo:Home) và ứng dụng di động để quản lý, điều khiển và tự động hóa các thiết bị trong nhà dựa trên nhận diện khuôn mặt, cử chỉ và sự hiện diện.
 
 ## Thành viên nhóm & Phân công
-* **Phú Thịnh, Tuấn:** Face Recognition (Nhận diện khuôn mặt, xác thực chủ nhà & cảnh báo an ninh).
+* **Phú Thịnh, Tuấn Duy:** Face Recognition (Nhận diện khuôn mặt, xác thực chủ nhà & cảnh báo an ninh).
 * **Dương, Bảo Nhi:** Motion/Gesture Detection (Nhận diện cử chỉ tay để điều khiển đèn, quạt).
 * **Yến Nhi, Phúc Thịnh:** Human Detection & Cảm biến (Tự động hóa môi trường rèm, đèn, quạt dựa trên hiện diện và cảm biến).
 
