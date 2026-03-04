@@ -80,6 +80,17 @@ data class AppStrings(
     val weahther: String,
     val activity: String,
     val other: String,
+    val addRoomTitle: String,
+    val roomNameInput: String,
+    val addBtn: String,
+    val faceRecognition: String,
+    val faceRecognitionDesc: String,
+    val startScan: String,
+    val stopScan: String,
+    val scanning: String,
+    val faceInstruction: String,
+    val continueBtn: String,
+    val role: String
 )
 
 // Dữ liệu Tiếng Việt
@@ -156,6 +167,17 @@ val VietnameseStrings = AppStrings(
     weahther = "Thời tiết",
     activity = "Hoạt động",
     other = "Khác",
+    addRoomTitle = "Thêm phòng mới",
+    roomNameInput = "Tên phòng",
+    addBtn = "Thêm",
+    faceRecognition = "Nhận diện khuôn mặt",
+    faceRecognitionDesc = "Thêm khuôn mặt để mở khóa cửa",
+    startScan = "Bắt đầu quét",
+    stopScan = "Dừng quét",
+    scanning = "Đang quét khuôn mặt...",
+    faceInstruction = "Vui lòng giữ khuôn mặt của bạn trong khung hình oval",
+    continueBtn = "Tiếp tục",
+    role = "Vai trò"
 )
 
 // Dữ liệu Tiếng Anh
@@ -232,4 +254,15 @@ val EnglishStrings = AppStrings(
     weahther = "Weather",
     activity = "Activity",
     other = "Others",
+    addRoomTitle = "Add new room",
+    roomNameInput = "Room name",
+    addBtn = "Add",
+    faceRecognition = "Face Recognition",
+    faceRecognitionDesc = "Add face to unlock door",
+    startScan = "Start Scan",
+    stopScan = "Stop Scan",
+    scanning = "Scanning face...",
+    faceInstruction = "Please keep your face within the oval frame",
+    continueBtn = "Continue",
+    role = "Role"
     )

@@ -49,7 +49,7 @@ fun DashboardScreen(
     onDeviceClick: (String) -> Unit,
     onNavigateToCreatePreset: () -> Unit,
     onNavigateToEditPreset: (String) -> Unit,
-    onNavigateToFaceScan: () -> Unit
+    // onNavigateToFaceScan: () -> Unit
 ) {
     val context = LocalContext.current
     val sharedPref = remember { context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE) }
@@ -106,6 +106,7 @@ fun DashboardScreen(
                 actions = { IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) } }
             )
         },
+        /*
         floatingActionButton = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -123,6 +124,7 @@ fun DashboardScreen(
                 }
             }
         }
+        */
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp)) {
 
@@ -462,9 +464,22 @@ fun DashboardScreen(
         var roomName by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showAddRoomDialog = false },
-            title = { Text("Thêm phòng mới") },
-            text = { OutlinedTextField(value = roomName, onValueChange = { roomName = it }, label = {Text("Tên phòng")}) },
-            confirmButton = { Button(onClick = { SmartHomeRepository.addRoom(roomName); showAddRoomDialog = false }) { Text("Thêm") } }
+            title = { Text(strings.addRoomTitle) }, // Đã dùng strings
+            text = {
+                OutlinedTextField(
+                    value = roomName,
+                    onValueChange = { roomName = it },
+                    label = { Text(strings.roomNameInput) } // Đã dùng strings
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    SmartHomeRepository.addRoom(roomName)
+                    showAddRoomDialog = false
+                }) {
+                    Text(strings.addBtn) // Đã dùng strings
+                }
+            }
         )
     }
 }

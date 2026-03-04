@@ -26,6 +26,7 @@ fun SettingsScreen(
     currentLanguage: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit,
     strings: AppStrings,
+    onNavigateToFaceScan: () -> Unit,
     onBack: () -> Unit
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -75,6 +76,14 @@ fun SettingsScreen(
                 title = strings.changePass,
                 subtitle = strings.updatePass,
                 onClick = { showPasswordDialog = true }
+            )
+
+            // face recognition
+            SettingItem(
+                icon = Icons.Default.Face, // Hoặc FaceUnlock
+                title = strings.faceRecognition,
+                subtitle = strings.faceRecognitionDesc,
+                onClick = { onNavigateToFaceScan() }
             )
 
             // Mục đổi Ngôn ngữ (Giả lập)
