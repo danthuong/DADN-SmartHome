@@ -13,7 +13,7 @@ from ..config.config import (
     JSONDbConfig,
     )
 
-from utils.similarity_compute import CosineSimilarity
+from ..utils.similarity_compute import CosineSimilarity
 
 # ===============================
 # Init FastAPI
@@ -70,6 +70,7 @@ def load_known_faces(location):
     if location not in location_cache:
         print(f"Loading embeddings for location: {location}")
         knowFaces = db.getEmbedding(Info(location=location))
+        knowFaces = preprocessing(knowFaces)
         location_cache[location] = knowFaces
     return location_cache[location]
 
@@ -81,13 +82,14 @@ def preprocessing(knowFaces):
 
     # Normalize từng embedding và gom nhóm
     for emb, name in knowFaces:
-        emb = np.array(emb)
+        emb = np.array(emb, dtype=np.float32)
         norm = np.linalg.norm(emb)
         if norm > 0:
             emb = emb / norm
         grouped[name].append(emb)
 
-    processed_faces = []
+    embeddings = []
+    names = []
 
     # Tính centroid cho từng người
     for name, emb_list in grouped.items():
@@ -98,9 +100,19 @@ def preprocessing(knowFaces):
         if norm > 0:
             centroid = centroid / norm
 
-        processed_faces.append((centroid, name))
+        embeddings.append(centroid)
+        names.append(name)
 
-    return processed_faces
+    if len(embeddings) == 0:
+        return {
+            "embeddings": np.empty((0, 512), dtype=np.float32),
+            "names": []
+        }
+
+    return {
+        "embeddings": np.stack(embeddings),  # (N, 512)
+        "names": names
+    }
 
 # ===============================
 # Detect endpoint
@@ -116,41 +128,79 @@ def detect(req: DetectRequest):
 
     # load đúng DB theo location
     knowFaces = load_known_faces(location)
-    knowFaces = preprocessing(knowFaces)
 
     # detect
     faces = model.detect(frame)
 
     results = []
 
+    # ===== Detect xong =====
+    faces = model.detect(frame)
+
+    results = []
+
+    if len(faces) == 0:
+        return results
+
+    db_embeddings = knowFaces["embeddings"]      # (N, 512)
+    db_names = knowFaces["names"]
+
+    # -------------------------
+    # Build face embedding matrix (M, 512)
+    # -------------------------
+    face_embeddings = []
+    bboxes = []
+
+    h, w = frame.shape[:2]
+
     for face in faces:
         x1, y1, x2, y2 = face.bbox.astype(int)
 
         # clamp
-        h, w = frame.shape[:2]
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)
 
-        embedding = face.embedding
+        emb = face.embedding.astype(np.float32)
+        norm = np.linalg.norm(emb)
+        if norm > 0:
+            emb = emb / norm
 
-        # -------------------------
-        # Recognition
-        # -------------------------
+        face_embeddings.append(emb)
+        bboxes.append((x1, y1, x2, y2))
+
+    if len(face_embeddings) == 0:
+        return results
+
+    face_embeddings = np.stack(face_embeddings)   # (M, 512)
+
+    # -------------------------
+    # Tensor similarity
+    # (M, 512) @ (512, N) = (M, N)
+    # -------------------------
+    sims = similarity.compute(face_embeddings, db_embeddings)
+
+    # -------------------------
+    # Find best match for each face
+    # -------------------------
+    for i in range(face_embeddings.shape[0]):
+
+        x1, y1, x2, y2 = bboxes[i]
+
         best_name = "Unknown"
         best_score = 0.0
 
-        for known_emb, known_name in knowFaces:
-            sim = similarity.compute(embedding, known_emb)
-            print("Similarity:", sim)
-            if sim > 0.75 and sim > best_score:
-                best_score = sim
-                best_name = known_name
+        if sims.shape[1] > 0:
+            best_idx = np.argmax(sims[i])
+            best_score = sims[i][best_idx]
+
+            if best_score > 0.6:
+                best_name = db_names[best_idx]
 
         results.append({
-            "bbox": [int(x1), int(y1), int(x2), int(y2)],
-            "embedding": embedding.tolist(),
-            "name": best_name,
-            "score": float(best_score)
-        })
+        "bbox": [int(x1), int(y1), int(x2), int(y2)],
+        "embedding": face_embeddings[i].tolist(),
+        "name": best_name,
+        "score": float(best_score)
+    })
 
     return results

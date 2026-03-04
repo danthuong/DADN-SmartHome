@@ -46,13 +46,14 @@ class FRDb(ABC):
         pass
 
 from pathlib import Path
-BASE_DIR = Path(__file__).resolve().parent.parent
 @register_db("jsonDb", JSONDbConfig)
 class JSON_FRDb(FRDb):
     def __init__(self, config):
-        self.db_path = BASE_DIR / config.db_path
-        self.image_dir = BASE_DIR / config.image_dir
+        base_path = os.path.join("modules", "face_recognition")
 
+        # Nối thêm prefix
+        self.db_path = os.path.join(base_path, config.db_path)
+        self.image_dir = os.path.join(base_path, config.image_dir)
         self.db_path = str(self.db_path)
         self.image_dir = str(self.image_dir)
 
