@@ -69,7 +69,7 @@ def main():
     modelConfig = Retina_ArcConfig(
         device="cpu",
         det_size=640,
-        scale="s"
+        scale="l"
     )
 
     model = ModelFactory.create("retina_arc", modelConfig)

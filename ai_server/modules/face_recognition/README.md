@@ -306,7 +306,7 @@ Các ảnh này sẽ được sử dụng để:
 Sau khi đã chụp và lưu ảnh vào thư mục `baseImg/`, tiến hành đăng ký khuôn mặt bằng cách chạy:
 
 ```bash
-python -m test.test_register_face
+python -m modules.face_recognition.test.test_register_face
 ```
 
 ---

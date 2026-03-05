@@ -1,6 +1,6 @@
 import cv2
 import requests
-import base64
+# import base64
 import numpy as np
 import threading
 import uuid
@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
-AI_URL = "http://127.0.0.1:8000/detect"
+AI_URL = "http://localhost:8000/detect"
 
 import os
 LOCATION = os.getenv("LOCATION")
@@ -26,34 +26,16 @@ frame_locks = {}
 
 class RegisterRequest(BaseModel):
     camera_url: str
-    location: str
+    room: str
 
 
 # ==============================
 # Utils
 # ==============================
 
-def encode_frame(frame):
-    _, buffer = cv2.imencode(".jpg", frame)
-    return base64.b64encode(buffer).decode("utf-8")
-
-
-def iou(boxA, boxB):
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-
-    interArea = max(0, xB - xA) * max(0, yB - yA)
-
-    boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
-    boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
-
-    if boxAArea + boxBArea - interArea == 0:
-        return 0
-
-    return interArea / float(boxAArea + boxBArea - interArea)
-
+# def encode_frame(frame):
+#     _, buffer = cv2.imencode(".jpg", frame)
+#     return base64.b64encode(buffer).decode("utf-8")
 
 # ==============================
 # Camera Worker
@@ -61,22 +43,29 @@ def iou(boxA, boxB):
 DISPLAY_LOCAL = True   # bật/tắt hiển thị màn hình local
 
 import threading
-from queue import Queue
-from queue import Empty
-def camera_worker(camera_id, camera_url, location):
+import time
+from queue import Queue, Empty
 
+def camera_worker(camera_id, camera_url, location, room):
+
+    session = requests.Session()
     print(f"[INFO] Starting camera {camera_id}")
 
-    detect_queue = Queue(maxsize=2)
+    frame_queue = Queue(maxsize=5)
+    detect_queue = Queue(maxsize=5)
 
     stop_event = threading.Event()
 
+    latest_detections = []
+    detections_lock = threading.Lock()
+
     # ===============================
-    # THREAD 1: CAPTURE + DETECT
+    # THREAD 1: CAPTURE
     # ===============================
-    def detect_loop():
+    def capture_loop():
 
         cap = cv2.VideoCapture(camera_url)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         frame_count = 0
 
         while not stop_event.is_set():
@@ -87,35 +76,75 @@ def camera_worker(camera_id, camera_url, location):
                 stop_event.set()
                 break
 
-            frame_count += 1
-            if frame_count % 5 != 0:
-                continue
-            frame_count = 0
+            frame = cv2.resize(frame, (640,640))
 
-            frame = cv2.resize(frame, (640, 480))
-            img_base64 = encode_frame(frame)
+            # push frame for tracking
+            if frame_queue.full():
+                try:
+                    frame_queue.get_nowait()
+                except:
+                    pass
 
             try:
-                response = requests.post(
-                    AI_URL,
-                    json={
-                        "frame": img_base64,
-                        "location": location
-                    },
-                    timeout=5
-                )
-                detections = response.json()
-            except Exception as e:
-                print("AI error:", e)
-                detections = []
+                frame_queue.put_nowait(frame)
+            except:
+                pass
 
-            if not detect_queue.full():
-                detect_queue.put((frame, detections))
+            # gửi detect mỗi 10 frame
+            frame_count += 1
+            if frame_count % 3 == 0:
+
+                if detect_queue.full():
+                    try:
+                        detect_queue.get_nowait()
+                    except:
+                        pass
+
+                try:
+                    detect_queue.put_nowait(frame.copy())
+                except:
+                    pass
 
         cap.release()
 
     # ===============================
-    # THREAD 2: TRACKING
+    # THREAD 2: DETECT
+    # ===============================
+    def detect_loop():
+
+        nonlocal latest_detections
+
+        while not stop_event.is_set():
+
+            try:
+                frame = detect_queue.get(timeout=1)
+            except Empty:
+                continue
+
+            _, buffer = cv2.imencode(".jpg", frame)
+
+            try:
+                response = session.post(
+                    AI_URL,
+                    files={"file": buffer.tobytes()},
+                    data={"location": location},
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    detections = response.json()
+                else:
+                    detections = []
+
+            except Exception as e:
+                print("AI error:", e)
+                detections = []
+
+            with detections_lock:
+                latest_detections = detections
+
+    # ===============================
+    # THREAD 3: TRACKING
     # ===============================
     def tracking_loop():
 
@@ -129,14 +158,18 @@ def camera_worker(camera_id, camera_url, location):
         while not stop_event.is_set():
 
             try:
-                frame, detections = detect_queue.get(timeout=1)
+                frame = frame_queue.get(timeout=1)
             except Empty:
                 continue
+
+            with detections_lock:
+                detections = list(latest_detections)
 
             ds_inputs = []
             embeddings = []
 
             for det in detections:
+
                 x1, y1, x2, y2 = det["bbox"]
                 embedding = np.array(det["embedding"], dtype=np.float32)
                 name = det["name"]
@@ -144,24 +177,26 @@ def camera_worker(camera_id, camera_url, location):
                 w = x2 - x1
                 h = y2 - y1
 
-                ds_inputs.append(([x1, y1, w, h], 1.0, name))
+                ds_inputs.append(([x1,y1,w,h],1.0,name))
                 embeddings.append(embedding)
 
             tracks = tracker.update_tracks(ds_inputs, embeds=embeddings)
 
             for track in tracks:
+
                 if not track.is_confirmed():
                     continue
 
-                l, t, r, b = track.to_ltrb()
+                l,t,r,b = track.to_ltrb()
                 track_id = track.track_id
                 display_name = track.get_det_class() or "Unknown"
 
-                cv2.rectangle(frame, (int(l), int(t)), (int(r), int(b)), (0,255,0), 2)
+                cv2.rectangle(frame,(int(l),int(t)),(int(r),int(b)),(0,255,0),2)
+
                 cv2.putText(
                     frame,
                     f"{display_name} | ID {track_id}",
-                    (int(l), int(t)-10),
+                    (int(l),int(t)-10),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
                     (0,255,0),
@@ -169,7 +204,7 @@ def camera_worker(camera_id, camera_url, location):
                 )
 
             if DISPLAY_LOCAL:
-                cv2.imshow(f"CAM - {location}", frame)
+                cv2.imshow(f"CAM - {location}/{room}", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     stop_event.set()
                     break
@@ -183,14 +218,18 @@ def camera_worker(camera_id, camera_url, location):
     # ===============================
     # START THREADS
     # ===============================
-    t1 = threading.Thread(target=detect_loop, daemon=True)
-    t2 = threading.Thread(target=tracking_loop, daemon=True)
+
+    t1 = threading.Thread(target=capture_loop, daemon=True)
+    t2 = threading.Thread(target=detect_loop, daemon=True)
+    t3 = threading.Thread(target=tracking_loop, daemon=True)
 
     t1.start()
     t2.start()
+    t3.start()
 
     t1.join()
     t2.join()
+    t3.join()
 
 
 # ==============================
@@ -203,6 +242,7 @@ def generate(camera_id):
             frame = output_frames.get(camera_id)
 
         if frame is None:
+            time.sleep(0.01)
             continue
 
         _, buffer = cv2.imencode(".jpg", frame)
@@ -214,6 +254,7 @@ def generate(camera_id):
             frame_bytes +
             b"\r\n"
         )
+        time.sleep(0.03)
 
 
 @app.get("/video/{camera_id}")
@@ -231,13 +272,6 @@ from fastapi import HTTPException
 @app.post("/register")
 def register_camera(req: RegisterRequest):
 
-    # Kiểm tra location có đúng backend này không
-    if req.location != LOCATION:
-        raise HTTPException(
-            status_code=403,
-            detail="Location mismatch. Cannot register camera."
-        )
-
     camera_id = str(uuid.uuid4())
 
     frame_locks[camera_id] = threading.Lock()
@@ -245,7 +279,7 @@ def register_camera(req: RegisterRequest):
 
     thread = threading.Thread(
         target=camera_worker,
-        args=(camera_id, req.camera_url, LOCATION),
+        args=(camera_id, req.camera_url, LOCATION, req.room),
         daemon=True
     )
 
