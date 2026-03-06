@@ -9,7 +9,7 @@ from database.db_manager import DatabaseManager
 # ==========================================
 AIO_USERNAME = "thinhphan2313306"
 AIO_KEY = "aio_VWuR71QDMpqjdnUvo65mq4sZKtmI"
-AIO_HUMAN_DETECT_FEED = "bbc-temp"  # Tạm dùng bbc-temp, sau này đổi tên trên Adafruit thì sửa ở đây
+AIO_HUMAN_DETECT_FEED = "human-detect-ai"  # Tạm dùng bbc-temp, sau này đổi tên trên Adafruit thì sửa ở đây
 # ==========================================
 # Định nghĩa các hàm cho giao thức MQTT
 # ==========================================
