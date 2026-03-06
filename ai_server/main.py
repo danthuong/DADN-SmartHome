@@ -34,6 +34,7 @@ def message(client, feed_id, payload):
         val = float(payload)
         if feed_id == "human-detect-pir":
             db.log_sensor("PIR", val)
+            print(f"[MQTT] PIR status: {val}")
         elif feed_id == "env-temp":
             current_temp = val
             db.log_sensor("TEMP", val)
@@ -107,15 +108,17 @@ while True:
         if trang_thai_chinh_thuc == 1:
             # Kiểm tra nhiệt độ
             status_fan = 1 if current_temp > threshold_temp else 0
-            db.log_device("FAN", status_fan, f"AI_ON_{current_temp}C", threshold_temp)
+            reason_fan = f"HOT: {current_temp}C > {threshold_temp}C" if status_fan else f"COOL: {current_temp}C <= {threshold_temp}C"
+            db.log_device("FAN", status_fan, reason_fan, threshold_temp)
             
             # Kiểm tra ánh sáng
             status_led = 1 if current_light < threshold_light else 0
-            db.log_device("LED", status_led, f"AI_ON_{current_light}lux", threshold_light)
+            reason_led = f"DARK: {current_light}lux < {threshold_light}lux" if status_led else f"BRIGHT: {current_light}lux >= {threshold_light}lux"
+            db.log_device("LED", status_led, reason_led, threshold_light)
         else:
             # Không có người thì mặc định lưu log Tắt
-            db.log_device("FAN", 0, "AI_OFF_EMPTY", threshold_temp)
-            db.log_device("LED", 0, "AI_OFF_EMPTY", threshold_light)
+            db.log_device("FAN", 0, "Phát hiện không có người", threshold_temp)
+            db.log_device("LED", 0, "Phát hiện không có người", threshold_light)
 
         last_state = trang_thai_chinh_thuc
         last_time = current_time
