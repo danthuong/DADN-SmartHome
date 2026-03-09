@@ -1,176 +1,723 @@
 package com.example.android_app.ui.screens
 
+import android.content.Context
+import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.NightsStay
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-// Chú ý: Đảm bảo các file theme này đã tồn tại trong project của bạn
-import com.example.android_app.ui.theme.BackgroundBlack
-import com.example.android_app.ui.theme.CardGray
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.android_app.data.*
 import com.example.android_app.ui.theme.PrimaryPurple
-import com.example.android_app.utils.sendNotification
+import com.example.android_app.utils.AppStrings
 import java.util.Calendar
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import com.example.android_app.utils.getTranslatedEmojiCategories
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardHeader(userName: String, onProfileClick: () -> Unit) {
+fun DashboardScreen(
+    user: User,
+    strings: AppStrings,
+    onLogout: () -> Unit,
+    onProfileClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onDeviceClick: (String) -> Unit,
+    onNavigateToCreatePreset: () -> Unit,
+    onNavigateToEditPreset: (String) -> Unit,
+    // onNavigateToFaceScan: () -> Unit
+) {
+    val context = LocalContext.current
+    val sharedPref = remember { context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE) }
+    val savedAvatarUri = sharedPref.getString("avatar_uri", null)?.let { Uri.parse(it) }
+
+    // --- 1. LẤY DATA TỪ REPO (PHÒNG, THIẾT BỊ, PRESETS) ---
+    val rooms by SmartHomeRepository.rooms.collectAsState() // Lấy từ Repo để thêm/xóa được
+    val roomIDs by SmartHomeRepository.roomIDs.collectAsState()
+    val roomNames by SmartHomeRepository.roomDisplayNames.collectAsState()
+    var selectedRoomID by remember { mutableStateOf("LIVING") } // Dùng ID để làm State
+
+    val allDevices by SmartHomeRepository.devices.collectAsState()
+    val filteredDevices = allDevices.filter { it.roomID == selectedRoomID }
+
+    val presets by SmartHomeRepository.presets.collectAsState()
+    val activePresetId by SmartHomeRepository.activePresetId.collectAsState()
+
+    // --- 2. QUẢN LÝ TRẠNG THÁI UI ---
+    // Khởi tạo phòng mặc định sau khi data load
+    LaunchedEffect(rooms) { if (selectedRoomID == "" && rooms.isNotEmpty()) selectedRoomID = rooms[0] }
+
+    var selectedDeviceForEdit by remember { mutableStateOf<SmartDevice?>(null) }
+    var selectedPresetToEdit by remember { mutableStateOf<Preset?>(null) }
+    var showAddRoomDialog by remember { mutableStateOf(false) }
+
     val calendar = Calendar.getInstance()
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
-    // Chọn Icon theo giờ thực tế
-    val weatherIcon = when (hour) {
-        in 6..17 -> {
-            Icons.Default.WbSunny // Ban ngày
+    val weatherIcon = if (hour in 6..17) Icons.Default.WbSunny else Icons.Default.NightsStay
+    val weatherText = if (hour in 6..17) strings.sun else strings.clear
+    var showAddDeviceDialog by remember { mutableStateOf(false) }
+
+    var showCreatePresetSheet by remember { mutableStateOf(false) }
+    var newPresetName by remember { mutableStateOf("") }
+    val selectedConfigs = remember { mutableStateMapOf<String, DeviceConfig>() }
+
+    val filteredPresets = presets.filter { it.roomID == selectedRoomID }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("YOLO HOME", fontWeight = FontWeight.ExtraBold) },
+                navigationIcon = {
+                    IconButton(onClick = onProfileClick) {
+                        if (savedAvatarUri != null) {
+                            AsyncImage(model = savedAvatarUri, contentDescription = null, modifier = Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        } else {
+                            Surface(Modifier.size(32.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) {
+                                Icon(Icons.Default.Person, null, Modifier.padding(6.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                },
+                actions = { IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, null) } }
+            )
+        },
+        /*
+        floatingActionButton = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                // 1. NÚT QUÉT KHUÔN MẶT (MỚI)
+                FloatingActionButton(
+                    onClick = onNavigateToFaceScan,
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primary, // Màu khác nút + để phân biệt
+                    contentColor = Color.White
+                ) {
+                    // Icon hình gương mặt/quét
+                    Icon(imageVector = Icons.Default.Face, contentDescription = "Face Scan")
+                }
+            }
         }
+        */
+    ) { padding ->
+        Column(modifier = Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp)) {
 
-        else -> Icons.Default.NightsStay // Ban đêm
-    }
-    val weatherText = if (hour in 6..17) "Trời nắng" else "Trời quang"
+            Row(
+            modifier = Modifier.fillMaxWidth().height(100.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Card Welcome (Chiếm 65%)
+                Card(
+                    modifier = Modifier.weight(0.65f).fillMaxHeight(),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(strings.welcome, style = MaterialTheme.typography.bodySmall)
+                        Text(user.fullName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.weight(1f))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = weatherIcon,
+                                contentDescription = null,
+                                tint = Color(0xFFFFB300),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "28°C - $weatherText", // Ví dụ: 28°C - Trời nắng
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(180.dp),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = PrimaryPurple.copy(alpha = 0.9f))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("CHÀO MỪNG ĐẾN SMART HOME", color = Color.White.copy(alpha = 0.8f))
-                Text(userName, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                // Card Temp (Chiếm 35%)
+                SensorCard(
+                    title = strings.temp,
+                    value = "28°C",
+                    modifier = Modifier.weight(0.35f).fillMaxHeight()
+                )
+            }
 
-                Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-                //Weather Row (Giả lập lấy từ cảm biến DHT20)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(weatherIcon, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(weatherText, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            // 1. QUẢN LÝ PHÒNG (CÓ NÚT +)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(strings.room, style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showAddRoomDialog = true }) {
+                    Icon(Icons.Default.AddCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                }
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(vertical = 5.dp)) {
+                items(roomIDs) { id ->
+                    val displayName = roomNames[id] ?: id
+                    FilterChip(
+                        selected = selectedRoomID == id,
+                        onClick = { selectedRoomID = id },
+                        label = { Text(displayName) },
+                        trailingIcon = {
+                            Icon(Icons.Default.Cancel, null, Modifier.size(16.dp).clickable { SmartHomeRepository.deleteRoom(id, user.username) })
+                        }
+                    )
                 }
             }
 
-            // Avatar Người dùng
-            IconButton(
-                onClick = onProfileClick,
-                modifier = Modifier.size(64.dp).background(Color.White.copy(alpha = 0.2f), CircleShape)
+            Spacer(Modifier.height(16.dp))
+
+            // PRESETS (SCENES) - Có chức năng chỉnh sửa khi nhấn giữ
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Person, contentDescription = "Profile", tint = Color.White, modifier = Modifier.size(32.dp))
+                Text(
+                    text = strings.presets,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.Gray,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = {
+                    newPresetName = ""
+                    selectedConfigs.clear()
+                    showCreatePresetSheet = true
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.AddCircle, // Dùng AddCircle cho giống phần Phòng
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+
+                items(filteredPresets) { preset ->
+                    PresetCard(
+                        preset = preset,
+                        isActive = preset.id == activePresetId,
+                        onClick = { SmartHomeRepository.togglePreset(preset.id) },
+                        onLongClick = { selectedPresetToEdit = preset }, // 2. CHỈNH SỬA PRESET
+                        onDelete = { SmartHomeRepository.deletePreset(preset.id)}
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // 4. DANH SÁCH THIẾT BỊ (QUẸT ĐỂ XOÁ)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = strings.devices,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.Gray,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { showAddDeviceDialog = true }) {
+                    Icon(
+                        imageVector = Icons.Default.AddCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f).padding(vertical = 8.dp)) {
+                items(filteredDevices, key = { it.id }) { device ->
+                    val dismissState = rememberSwipeToDismissBoxState(
+                        confirmValueChange = {
+                            if (it == SwipeToDismissBoxValue.EndToStart) {
+                                SmartHomeRepository.deleteDevice(device.id)
+                                true
+                            } else false
+                        }
+                    )
+
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        enableDismissFromStartToEnd = false,
+                        backgroundContent = {
+                            val color = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) Color.Red else Color.Transparent
+                            Box(Modifier.fillMaxSize().background(color,RoundedCornerShape(20.dp) ).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                                if (color == Color.Red) Icon(Icons.Default.Delete, null, tint = Color.White)
+                            }
+                        }
+                    ) {
+                        DeviceItemCard(
+                            device = device,
+                            strings = strings,
+                            onClick = { selectedDeviceForEdit = device } // 5. CLICK ĐỂ MỞ EDIT SHEET
+                        )
+                    }
+                }
             }
         }
     }
-}
 
-@Composable
-fun DashboardScreen(userName: String, onLogout: () -> Unit, onProfileClick: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    if (showCreatePresetSheet) {
+        var showEmojiPicker by remember { mutableStateOf(false) }
+        var selectedIcon by remember { mutableStateOf("✨") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .padding(16.dp)
-    ) {
-        DashboardHeader(userName = userName, onProfileClick = onProfileClick)
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Khu vực hiển thị thông số (Nhiệt độ/Ánh sáng)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SensorCard("Nhiệt độ", "28°C", modifier = Modifier.weight(1f))
-            Spacer(modifier = Modifier.width(16.dp))
-            SensorCard("Ánh sáng", "150 Lux", modifier = Modifier.weight(1f))
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text("THIẾT BỊ", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Khu vực điều khiển thiết bị
-        DeviceControlCard("Đèn", icon = Icons.Default.Lightbulb)
-        Spacer(modifier = Modifier.height(16.dp))
-        DeviceControlCard("Quạt", icon = Icons.Default.Air)
-
-        Spacer(modifier = Modifier.height(30.dp))
-
-        Button(
-            onClick = { sendNotification(context, "Cảnh báo!", "Có người lạ trước cửa!") },
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple)
+        ModalBottomSheet(
+            onDismissRequest = { showCreatePresetSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
-            Text("Test Notification")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.8f) // Chiếm 80% màn hình
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                Text(strings.createPreset, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Ô CHỌN ICON (Bên trái)
+                    Surface(
+                        onClick = { showEmojiPicker = !showEmojiPicker },
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = if (showEmojiPicker) BorderStroke(4.dp, MaterialTheme.colorScheme.primary) else null
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(text = selectedIcon, fontSize = 28.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    // Ô NHẬP TÊN (Bên phải)
+                    OutlinedTextField(
+                        value = newPresetName,
+                        onValueChange = { newPresetName = it },
+                        label = { Text(strings.enterPresetName) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                }
+
+                AnimatedVisibility(visible = showEmojiPicker) {
+                    Column {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp) // Giới hạn chiều cao để không choán hết chỗ chọn thiết bị
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                                .padding(8.dp)
+                        ) {
+                            EmojiPickerGrid(
+                                selectedIcon = selectedIcon,
+                                strings = strings,
+                                onIconSelected = {
+                                    selectedIcon = it
+                                    showEmojiPicker = false // Chọn xong tự đóng lại cho gọn
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "${strings.devicesIn} $selectedRoomID",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.Gray
+                )
+
+                // Danh sách thiết bị để chọn cấu hình cho Preset
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredDevices) { device ->
+                        DeviceSelectionCard(
+                            device = device,
+                            displayName = device.name,
+                            strings = strings,
+                            currentConfig = selectedConfigs[device.id],
+                            onConfigChanged = { config ->
+                                if (config == null) selectedConfigs.remove(device.id)
+                                else selectedConfigs[device.id] = config
+                            }
+                        )
+                    }
+                }
+
+                // NÚT LƯU
+                Button(
+                    onClick = {
+                        if (newPresetName.isNotEmpty() && selectedConfigs.isNotEmpty()) {
+                            val newPreset = Preset(
+                                name = newPresetName,
+                                icon = selectedIcon,
+                                deviceConfigs = selectedConfigs.toMap(),
+                                roomID = selectedRoomID
+                            )
+                            // 1. Gửi dữ liệu xuống Repository để lưu vào List
+                            SmartHomeRepository.savePreset(newPreset)
+                            // 2. Đóng Pop-up
+                            showCreatePresetSheet = false
+
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp).padding(vertical = 8.dp)
+                ) {
+                    Text(strings.save)
+                }
+            }
         }
+    }
+
+    // --- HIỂN THỊ POP-UP CHỈNH SỬA PRESET ---
+    if (selectedPresetToEdit != null) {
+        ModalBottomSheet(
+            onDismissRequest = { selectedPresetToEdit = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            var showEmojiPicker by remember { mutableStateOf(false) } // State để ẩn/hiện bảng chọn icon
+            var selectedIcon by remember { mutableStateOf("✨") }
+            // Ở đây bạn có thể tái sử dụng logic của CreatePresetScreen
+            // nhưng truyền ID vào để Edit
+            PresetEditSheet(
+                preset = selectedPresetToEdit!!,
+                selectedRoom = selectedRoomID,
+                strings = strings,
+                onDismiss = { selectedPresetToEdit = null }
+            )
+        }
+    }
+
+    if (showAddDeviceDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddDeviceDialog = false },
+            title = { Text(strings.addDevice) },
+            text = { Text("${strings.addDeviceAsk} ${selectedRoomID}?") },
+            confirmButton = {
+                Button(onClick = {
+                    val newDevice = SmartHomeRepository.addDevice(selectedRoomID, DeviceType.LIGHT, strings)
+                    showAddDeviceDialog = false
+                    selectedDeviceForEdit = newDevice
+                }) { Text(strings.addLight) }
+            },
+            dismissButton = {
+                Button(onClick = {
+                    val newDevice = SmartHomeRepository.addDevice(selectedRoomID, DeviceType.FAN, strings)
+                    showAddDeviceDialog = false
+                    selectedDeviceForEdit = newDevice
+                }) { Text(strings.addFan) }
+            }
+        )
+    }
+
+    // --- 5. POP-UP CHỈNH SỬA (BOTTOM SHEET) ---
+    if (selectedDeviceForEdit != null) {
+        ModalBottomSheet(
+            onDismissRequest = { selectedDeviceForEdit = null },
+            sheetState = rememberModalBottomSheetState()
+        ) {
+            EditDeviceSheet(device = selectedDeviceForEdit!!, strings = strings) {
+                selectedDeviceForEdit = null
+            }
+        }
+    }
+
+    // --- 1. DIALOG THÊM PHÒNG ---
+    if (showAddRoomDialog) {
+        var roomName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddRoomDialog = false },
+            title = { Text(strings.addRoomTitle) }, // Đã dùng strings
+            text = {
+                OutlinedTextField(
+                    value = roomName,
+                    onValueChange = { roomName = it },
+                    label = { Text(strings.roomNameInput) } // Đã dùng strings
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    SmartHomeRepository.addRoom(roomName)
+                    showAddRoomDialog = false
+                }) {
+                    Text(strings.addBtn) // Đã dùng strings
+                }
+            }
+        )
     }
 }
 
+// --- 1. CARD HIỂN THỊ THÔNG SỐ (Sensor) ---
 @Composable
 fun SensorCard(title: String, value: String, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        shape = RoundedCornerShape(16.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(20.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(title, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
-            Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineMedium)
+        Column(modifier = Modifier
+            .fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally, // Căn giữa ngang
+            verticalArrangement = Arrangement.Center // Căn giữa dọc
+        ) {
+            Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 12.sp)
+            Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
     }
 }
 
+// --- 2. CARD HIỂN THỊ NGỮ CẢNH (Preset) ---
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DeviceControlCard(name: String, icon: ImageVector) {
-    // Sửa lỗi: Cần import androidx.compose.runtime.setValue để dùng 'by'
-    var isOn by remember { mutableStateOf(false) }
+fun PresetCard(
+    preset: Preset,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDelete: () -> Unit// Xử lý xóa khi nhấn giữ
+) {
+    Box(modifier = Modifier.padding(top = 4.dp, end = 4.dp)) {
+        Card(
+            modifier = Modifier
+                .size(width = 110.dp, height = 80.dp)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                ),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(preset.icon, fontSize = 24.sp)
+                Text(
+                    preset.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isActive) Color.White else MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+        // NÚT 'X' ĐỂ XOÁ Ở GÓC PHẢI TRÊN (Yêu cầu 1)
+        Surface(
+            modifier = Modifier
+                .size(20.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 4.dp, y = (-6).dp) // Đẩy nút ra góc
+                .clickable { onDelete() },
+            shape = CircleShape,
+            color = Color.Gray,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Delete",
+                tint = Color.White,
+                modifier = Modifier.padding(4.dp)
+            )
+        }
+    }
+}
 
+// --- 3. CARD HIỂN THỊ THIẾT BỊ (Device) ---
+@Composable
+fun DeviceItemCard(
+    device: SmartDevice,
+    strings: AppStrings,
+    onClick: () -> Unit
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant )
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // --- LOGIC CHỌN ICON ĐỘNG CHO QUẠT VÀ ĐÈN ---
+            val displayIcon = when (device) {
+                is SmartLight -> Icons.Default.Lightbulb
+                is SmartFan -> Icons.Default.WindPower
+            }
+
+            // Màu sắc và độ chói (giữ nguyên logic cũ cho đèn)
+            val iconColor = if (device is SmartLight) Color(device.color) else MaterialTheme.colorScheme.primary
+            val alphaValue = if (device is SmartLight && device.isOn) {
+                (device.brightness / 100f).coerceAtLeast(0.3f)
+            } else 1f
+
+            // HIỂN THỊ ICON CHÍNH ĐÃ ĐƯỢC THAY ĐỔI
             Icon(
-                imageVector = icon,
+                imageVector = displayIcon,
                 contentDescription = null,
-                tint = if (isOn) PrimaryPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                tint = if (device.isOn) iconColor.copy(alpha = alphaValue) else Color.Gray,
+                modifier = Modifier.size(32.dp)
             )
+
             Spacer(modifier = Modifier.width(16.dp))
-            Text(name, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = device.name,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                // Hiển thị trạng thái bằng chữ (Optional)
+                if (device is SmartLight) {
+                    // Nếu là Đèn: Hiện % độ sáng (hoặc "Off")
+                    Text(
+                        text = if (device.isOn) "${device.brightness.toInt()}%" else strings.off,
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else if (device is SmartFan) {
+                    WindSpeedBar(speed = device.speed.toInt(), isOn = device.isOn)
+                } else strings.off
+            }
+
+            // Nút gạt nhanh On/Off
             Switch(
-                checked = isOn,
-                onCheckedChange = { isOn = it },
+                checked = device.isOn,
+                onCheckedChange = { isChecked ->
+                    if (device is SmartLight) SmartHomeRepository.updateLight(device.id, isOn = isChecked)
+                    if (device is SmartFan) SmartHomeRepository.updateFan(device.id, isOn = isChecked)
+                },
                 colors = SwitchDefaults.colors(
-                    // Khi đang BẬT
-                    checkedThumbColor = Color.White,           // Nút tròn màu trắng (cho nổi bật)
-                    checkedTrackColor = PrimaryPurple, // Thanh trượt màu tím/xanh đậm
-
-                    // Khi đang TẮT
-                    uncheckedThumbColor = Color.Gray,          // Nút tròn màu xám
-                    uncheckedTrackColor = Color.LightGray.copy(alpha = 0.5f), // Thanh trượt xám nhạt
-
-                    // Màu viền khi tắt (tùy chọn)
-                    uncheckedBorderColor = Color.Gray
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary
                 )
             )
         }
+    }
+}
+
+@Composable
+fun WindSpeedBar(speed: Int, isOn: Boolean) {
+    Row(
+        modifier = Modifier.padding(top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp) // Khoảng cách giữa các vạch
+    ) {
+        repeat(3) { index ->
+            Box(
+                modifier = Modifier
+                    .width(18.dp)       // Độ dài mỗi vạch
+                    .height(5.dp)       // Độ dày mỗi vạch
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        if (isOn && speed > index) MaterialTheme.colorScheme.primary
+                        else Color.LightGray.copy(alpha = 0.4f)
+                    )
+            )
+        }
+    }
+}
+@OptIn(ExperimentalLayoutApi::class) // Chỉ cần cái này cho FlowRow
+@Composable
+fun EmojiPickerGrid(
+    selectedIcon: String,
+    strings: AppStrings,
+    onIconSelected: (String) -> Unit
+) {
+    val translatedCategories = getTranslatedEmojiCategories(strings)
+    // Dùng LazyColumn để có thể cuộn danh sách icon dài
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        translatedCategories.forEach { category ->
+            item {
+                Text(
+                    text = category.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // FlowRow tự động xuống hàng
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    category.emojis.forEach { emoji ->
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (selectedIcon == emoji) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                    else Color.Transparent
+                                )
+                                .border(
+                                    width = if (selectedIcon == emoji) 2.dp else 0.dp,
+                                    color = if (selectedIcon == emoji) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = CircleShape
+                                )
+                                .clickable { onIconSelected(emoji) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(emoji, fontSize = 22.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun getRoomDisplayName(id: String, strings: AppStrings): String {
+    return when(id) {
+        "LIVING" -> strings.roomLiving
+        "BED" -> strings.roomBed
+        "KITCHEN" -> strings.roomKitchen
+        "GARDEN" -> strings.Garden
+        else -> id // Nếu là phòng user tự tạo thì hiện nguyên tên
     }
 }
