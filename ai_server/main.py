@@ -1,7 +1,10 @@
 import cv2
+import cv2
 import sys
 import os
+import os
 import time
+import numpy as np
 import numpy as np
 from Adafruit_IO import MQTTClient
 from dotenv import load_dotenv
@@ -38,6 +41,7 @@ def draw_hand_skeleton_from_array(frame, kp_array, w, h):
             cv2.line(frame, pt1, pt2, (255, 0, 0), 2)
 
 # ==========================================
+# CẤU HÌNH ADAFRUIT IO & MQTT CALLBACKS
 # CẤU HÌNH ADAFRUIT IO & MQTT CALLBACKS
 # ==========================================
 AIO_USERNAME = os.getenv("AIO_USERNAME")
