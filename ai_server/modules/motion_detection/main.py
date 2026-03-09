@@ -4,9 +4,16 @@ import os
 import time
 import numpy as np
 
-sys.path.append(os.path.abspath("../"))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "../../"))
 
-from human_detection.human_detector import HumanDetector
+if ROOT_DIR not in sys.path:
+    sys.path.append(ROOT_DIR)
+    
+YOLO_MODEL_PATH = os.path.join(ROOT_DIR, "models", "yolov8x.pt")
+MP_MODEL_PATH = os.path.join(ROOT_DIR, "models", "gesture_recognizer.task")
+
+from modules.human_detection.human_detector import HumanDetector
 from kp_extractor import HandExtractor
 
 # Khai báo các điểm nối ngón tay để vẽ xương
@@ -43,8 +50,8 @@ def draw_hand_skeleton_from_array(frame, kp_array, w, h):
 
 def main():
     # Khởi tạo 2 module độc lập
-    yolo_ai = HumanDetector(model_path='yolov8x.pt', conf_threshold=0.6)
-    mp_ai = HandExtractor(mp_model='gesture_recognizer.task')
+    yolo_ai = HumanDetector(model_path=YOLO_MODEL_PATH, conf_threshold=0.6)
+    mp_ai = HandExtractor(mp_model=MP_MODEL_PATH)
 
     print("[SYSTEM] Bắt đầu chạy Real-time. Bấm 'q' để thoát.")
 
