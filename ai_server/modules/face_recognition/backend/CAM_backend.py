@@ -51,7 +51,7 @@ def camera_worker(camera_id, camera_url, location, room):
     session = requests.Session()
     print(f"[INFO] Starting camera {camera_id}")
 
-    frame_queue = Queue(maxsize=5)
+    frame_queue = Queue(maxsize=1)
     detect_queue = Queue(maxsize=5)
 
     stop_event = threading.Event()
@@ -67,7 +67,8 @@ def camera_worker(camera_id, camera_url, location, room):
         cap = cv2.VideoCapture(camera_url)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         frame_count = 0
-
+        last_detect = 0
+        
         while not stop_event.is_set():
 
             ret, frame = cap.read()
@@ -91,9 +92,8 @@ def camera_worker(camera_id, camera_url, location, room):
                 pass
 
             # gửi detect mỗi 10 frame
-            frame_count += 1
-            if frame_count % 3 == 0:
-
+            if time.time() - last_detect > 0.3:
+                last_detect = time.time()
                 if detect_queue.full():
                     try:
                         detect_queue.get_nowait()
@@ -149,11 +149,14 @@ def camera_worker(camera_id, camera_url, location, room):
     def tracking_loop():
 
         tracker = DeepSort(
-            max_age=8,
+            max_age=15,
             n_init=3,
             max_cosine_distance=0.4,
             embedder=None
         )
+
+        last_detection_time = 0
+        DETECT_INTERVAL = 0.3  # seconds
 
         while not stop_event.is_set():
 
@@ -162,44 +165,59 @@ def camera_worker(camera_id, camera_url, location, room):
             except Empty:
                 continue
 
+            # lấy detection mới nhất
             with detections_lock:
                 detections = list(latest_detections)
 
             ds_inputs = []
             embeddings = []
 
-            for det in detections:
+            if detections:
 
-                x1, y1, x2, y2 = det["bbox"]
-                embedding = np.array(det["embedding"], dtype=np.float32)
-                name = det["name"]
+                for det in detections:
 
-                w = x2 - x1
-                h = y2 - y1
+                    x1, y1, x2, y2 = det["bbox"]
+                    embedding = np.array(det["embedding"], dtype=np.float32)
+                    name = det["name"]
 
-                ds_inputs.append(([x1,y1,w,h],1.0,name))
-                embeddings.append(embedding)
+                    w = x2 - x1
+                    h = y2 - y1
 
-            tracks = tracker.update_tracks(ds_inputs, embeds=embeddings)
+                    ds_inputs.append(([x1, y1, w, h], 1.0, name))
+                    embeddings.append(embedding)
+
+                tracks = tracker.update_tracks(ds_inputs, embeds=embeddings)
+
+            else:
+                # không có detection -> chỉ predict
+                tracks = tracker.update_tracks([], embeds=[])
+
+            # ======================
+            # DRAW TRACKS
+            # ======================
 
             for track in tracks:
 
                 if not track.is_confirmed():
                     continue
 
-                l,t,r,b = track.to_ltrb()
+                l, t, r, b = track.to_ltrb()
                 track_id = track.track_id
                 display_name = track.get_det_class() or "Unknown"
 
-                cv2.rectangle(frame,(int(l),int(t)),(int(r),int(b)),(0,255,0),2)
+                cv2.rectangle(frame,
+                            (int(l), int(t)),
+                            (int(r), int(b)),
+                            (0, 255, 0),
+                            2)
 
                 cv2.putText(
                     frame,
                     f"{display_name} | ID {track_id}",
-                    (int(l),int(t)-10),
+                    (int(l), int(t) - 10),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    (0,255,0),
+                    (0, 255, 0),
                     2
                 )
 
