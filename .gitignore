@@ -21,13 +21,12 @@ venv/
 *.onnx
 *.dat
 
-ai_server/models/*
 !ai_server/models/.gitkeep
 
 # ===============================
 # Database
 # ===============================
-ai_server/database/*.db
+*.db
 
 # ===============================
 # ESP32 / Microcontroller
