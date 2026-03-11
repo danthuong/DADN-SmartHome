@@ -49,9 +49,13 @@ def draw_hand_skeleton_from_array(frame, kp_array, w, h):
 
 
 def main():
-    # Khởi tạo 2 module độc lập
     yolo_ai = HumanDetector(model_path=YOLO_MODEL_PATH, conf_threshold=0.6)
-    mp_ai = HandExtractor(mp_model=MP_MODEL_PATH)
+    mp_ai = HandExtractor(mp_model=MP_MODEL_PATH, max_hands=4)
+
+    cap = cv2.VideoCapture(1) # Thay đổi ID camera nếu cần
+    if not cap.isOpened():
+        print("[ERROR] Không thể mở Camera!")
+        sys.exit(1)
 
     print("[SYSTEM] Bắt đầu chạy Real-time. Bấm 'q' để thoát.")
 
@@ -59,64 +63,62 @@ def main():
     start_time = time.time()
     mp_frame_count = 0
     total_hands_detected = 0
+    last_mp_timestamp = 0 # Dùng để tránh cộng dồn trùng lặp
 
-    while True:
-        # 1. Quét bằng YOLO
-        state, frame, persons_bbox = yolo_ai.scan_and_display()
+    print("[SYSTEM] Bắt đầu chạy Real-time. Bấm 'q' để thoát.")
 
-        if state == -1:
-            break
-
-        # Lấy kích thước ảnh để tính toán tọa độ vẽ tay
-        h, w, _ = frame.shape
-
-        # 2. Nếu YOLO thấy người -> Gọi MediaPipe
-        if state == 1:
-            timestamp_ms = int(time.time() * 1000)
-            
-            # Kết hợp data 2 bên
-            final_data = mp_ai.extract_hands(frame, persons_bbox, timestamp_ms)
-
-            # Cập nhật số frame MediaPipe đã chạy
-            mp_frame_count += 1
-
-            # --- VẼ THÔNG TIN LÊN MÀN HÌNH CHÍNH ---
-            for track_id, data in final_data.items():
-                x1, y1, x2, y2 = data["bbox"]
-                hands_count = len(data["hands"])
-                
-                # Cộng dồn số bàn tay trích xuất được
-                total_hands_detected += hands_count
-                
-                # Vẽ Box và ID người
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {track_id} - Tay: {hands_count}", 
-                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-                # Vẽ từng bàn tay của người này
-                for hand_array in data["hands"]:
-                    draw_hand_skeleton_from_array(frame, hand_array, w, h)
-
-        # --- LOG THỐNG KÊ SAU MỖI 1 GIÂY ---
-        current_time = time.time()
-        elapsed_time = current_time - start_time
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret: break
         
-        if elapsed_time >= 1.0:
-            if state == 1:
-                print(f"[LOG] Pipeline FPS: {mp_frame_count} | Số tay trích xuất/giây: {total_hands_detected}")
-            else:
-                print("[LOG] Không có người, Pipeline đang chạy ở max tốc độ (YOLO only)...")
-                
-            # Reset bộ đếm cho giây tiếp theo
-            start_time = current_time
-            mp_frame_count = 0
-            total_hands_detected = 0
+        frame = cv2.flip(frame, 1)
 
-        # Trạng thái bằng 0 (không có người) thì nó chỉ vẽ hình cam bình thường
-        cv2.imshow("Smart Home AI", frame)
+        # Đẩy frame vào các luồng xử lý ngầm
+        current_time = time.time()
+        timestamp_ms = int(current_time * 1000)
+        
+        yolo_ai.update_frame(frame)
+        mp_ai.process_frame_async(frame, timestamp_ms)
+
+        # Lấy kết quả mới nhất
+        state, persons_bbox = yolo_ai.get_latest_results()
+        
+        # Hàm get_latest_results của MediaPipe giờ chỉ cần trả về 4 biến (tay, cử chỉ, ảnh, fps)
+        hands_data, gestures_data, mp_frame, mp_fps = mp_ai.get_latest_results()
+
+        # Chọn frame để hiển thị (Ưu tiên mp_frame để khớp xương 100%)
+        if mp_frame is not None:
+            display_frame = mp_frame.copy()
+        else:
+            display_frame = frame.copy()
+
+        h, w = display_frame.shape[:2]
+
+        # --- VẼ LÊN MÀN HÌNH ---
+        # 1. Vẽ Box YOLO
+        if persons_bbox:
+            for track_id, bbox in persons_bbox.items():
+                x1, y1, x2, y2 = bbox
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(display_frame, f"Person ID: {track_id}", (x1, y1 - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        # 2. Vẽ xương tay và Cử chỉ
+        for idx, hand_array in enumerate(hands_data):
+            draw_hand_skeleton_from_array(display_frame, hand_array, w, h)
+            gesture = gestures_data[idx] if idx < len(gestures_data) else "None"
+            cv2.putText(display_frame, f"Gest: {gesture}", (20, 100 + (idx*40)), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+
+        # Hiển thị FPS trên góc màn hình
+        cv2.putText(display_frame, f"MP FPS: {mp_fps}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+        cv2.imshow("Smart Home AI", display_frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+    # Dọn dẹp
+    cap.release()
     yolo_ai.cleanup()
     mp_ai.cleanup()
     cv2.destroyAllWindows()
