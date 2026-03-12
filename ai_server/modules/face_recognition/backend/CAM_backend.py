@@ -12,7 +12,6 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 AI_URL = "http://localhost:8000/detect"
 
 import os
-LOCATION = os.getenv("LOCATION")
 app = FastAPI()
 
 camera_workers = {}
@@ -91,7 +90,7 @@ def camera_worker(camera_id, camera_url, location, room):
             except:
                 pass
 
-            # gửi detect mỗi 10 frame
+            # gửi detect mỗi 0.3s
             if time.time() - last_detect > 0.3:
                 last_detect = time.time()
                 if detect_queue.full():
@@ -283,29 +282,42 @@ def video_feed(camera_id: str):
     )
 
 
-# ==============================
-# REGISTER
-# ==============================
-from fastapi import HTTPException
-@app.post("/register")
-def register_camera(req: RegisterRequest):
+import os
+import yaml
 
-    camera_id = str(uuid.uuid4())
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    frame_locks[camera_id] = threading.Lock()
-    output_frames[camera_id] = None
+def load_config():
+    path = os.path.join(BASE_DIR, "CAM_config.yaml")
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
+    
+def start_cameras():
 
-    thread = threading.Thread(
-        target=camera_worker,
-        args=(camera_id, req.camera_url, LOCATION, req.room),
-        daemon=True
-    )
+    config = load_config()
 
-    thread.start()
-    camera_workers[camera_id] = thread
+    location = config["location"]
 
-    return {
-        "status": "registered",
-        "camera_id": camera_id,
-        "video_url": f"http://127.0.0.1:9000/video/{camera_id}"
-    }
+    for cam in config["cameras"]:
+
+        camera_id = str(uuid.uuid4())
+        camera_url = cam["url"]
+        room = cam["room"]
+
+        frame_locks[camera_id] = threading.Lock()
+        output_frames[camera_id] = None
+
+        thread = threading.Thread(
+            target=camera_worker,
+            args=(camera_id, camera_url, location, room),
+            daemon=True
+        )
+
+        thread.start()
+        camera_workers[camera_id] = thread
+
+        print(f"[INFO] Camera started: {room} ({camera_url})")
+
+@app.on_event("startup")
+def startup_event():
+    start_cameras()

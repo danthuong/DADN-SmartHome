@@ -390,7 +390,7 @@ cd ai_server
 venv\Scripts\activate
 uvicorn modules.face_recognition.backend.CAM_simulation:app --host 0.0.0.0 --port 7000
 uvicorn modules.face_recognition.backend.AI_backend:app --host 0.0.0.0 --port 8000
-$env:LOCATION="house_A"; uvicorn modules.face_recognition.backend.CAM_backend:app --host 0.0.0.0 --port 9000
+uvicorn modules.face_recognition.backend.CAM_backend:app --host 0.0.0.0 --port 9000
 ```
 
 ---

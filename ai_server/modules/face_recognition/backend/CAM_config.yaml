@@ -1,0 +1,5 @@
+location: house_A
+
+cameras:
+  - room: bedroom
+    url: "http://192.168.137.208:8080/video"
