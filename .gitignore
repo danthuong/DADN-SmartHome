@@ -27,7 +27,7 @@ venv/
 # Database
 # ===============================
 *.db
-
+ai_server/modules/motion_detection/data/*
 # ===============================
 # ESP32 / Microcontroller
 # ===============================
