@@ -1,22 +1,23 @@
 import os
 import sys
-
-# 1. Tắt log của TensorFlow và MediaPipe thông qua biến môi trường
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'      # Tắt log TensorFlow (0: All, 3: Fatal only)
-os.environ['GLOG_minloglevel'] = '3'         # Tắt log Google Log (MediaPipe)
-os.environ['OPENCV_LOG_LEVEL'] = 'OFF'       # Tắt log OpenCV
-
-import math
 import cv2
 import time
-import numpy as np
 import pandas as pd
 import pickle
 import collections
-from datetime import datetime
-import threading
 import pyaudio 
-from audio_handler import AudioClapDetector
+
+# 1. Tắt log của TensorFlow và MediaPipe thông qua biến môi trường
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'      
+os.environ['GLOG_minloglevel'] = '3'         
+os.environ['OPENCV_LOG_LEVEL'] = 'OFF'
+
+def silence_stderr():
+    # Mở file "hố đen"
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    # Ép luồng stderr (số 2) ghi vào hố đen thay vì màn hình
+    os.dup2(devnull, 2)
+
 
 # Thiết lập đường dẫn hệ thống
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,88 +26,26 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from modules.human_detection.human_detector import HumanDetector
-from kp_extractor import HandExtractor
+from modules.motion_detection.handlers.kp_extractor import HandExtractor
+from modules.motion_detection.handlers.audio_handler import AudioClapDetector
+from modules.motion_detection.utils.hand_helpers import preprocess_landmarks, calculate_tilt_angle
+from modules.motion_detection.utils.visualizer import draw_hand_skeleton
+from modules.motion_detection.utils.logger import send_mqtt_command
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ---
 YOLO_MODEL_PATH = os.path.join(ROOT_DIR, "models", "yolov8n.pt")
-GESTURE_MODEL_PATH = "gesture_model.pkl"
+GESTURE_MODEL_PATH = os.path.join(ROOT_DIR, "modules", "motion_detection", "models", "gesture_model.pkl")
 MP_MODEL_PATH = os.path.join(ROOT_DIR, "models", "gesture_recognizer.task")
 AUDIO_MODEL_PATH = os.path.join(ROOT_DIR, "models", "yamnet.tflite")
-
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
-    (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),
-    (13, 17), (0, 17), (17, 18), (18, 19), (19, 20)
-]
 
 # --- BIẾN TOÀN CỤC ---
 last_gesture_state = "none"
 gesture_buffer = collections.deque(maxlen=5) 
 clap_count = 0
 last_clap_time = 0
-is_clapping_now = False
-is_clapping_current_time = False
-prev_hand_count = 0
-# Biến hỗ trợ xoay cổ tay (Mục tiêu mới)
 last_tilt_angle = 0 
 
-# --- CẤU HÌNH AUDIO ---
-CHUNK = 1024
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-RATE = 44100
-# Ngưỡng âm thanh (Bạn cần tự chỉnh số này tùy độ nhạy của Mic, ví dụ: 2000-8000)
-AUDIO_THRESHOLD = 5000 
-
-# --- BIẾN TOÀN CỤC DÙNG CHUNG GIỮA 2 LUỒNG ---
-last_audio_clap_time = 0
-audio_trigger_active = False
-
-# 2. Hàm chặn luồng lỗi (stderr) ở cấp độ hệ thống (C++ level)
-def silence_stderr():
-    # Mở file "hố đen"
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    # Ép luồng stderr (số 2) ghi vào hố đen thay vì màn hình
-    os.dup2(devnull, 2)
-
-# Gọi hàm này ngay lập tức trước khi import các thư viện nặng
 silence_stderr()
-
-def preprocess_landmarks(kp_array_63):
-    points = kp_array_63.reshape(21, 3)[:, :2]
-    temp_list = []
-    base_x, base_y = points[0][0], points[0][1]
-    for x, y in points:
-        temp_list.append([x - base_x, y - base_y])
-    max_val = max([max(abs(x), abs(y)) for x, y in temp_list])
-    if max_val == 0: max_val = 1
-    return np.array(temp_list).flatten() / max_val
-
-def calculate_tilt_angle(kp_array_63):
-    """Tính góc nghiêng của bàn tay dựa trên điểm 5 và 17"""
-    points = kp_array_63.reshape(21, 3)
-    p5 = points[5]  # Gốc ngón trỏ
-    p17 = points[17] # Gốc ngón út
-    
-    # Tính góc dựa trên atan2 (kết quả trả về độ -180 đến 180)
-    angle = math.degrees(math.atan2(p17[1] - p5[1], p17[0] - p5[0]))
-    return angle
-
-def send_mqtt_command(command):
-    print(f"\033[92m[IOT COMMAND] >>> GỬI LỆNH: {command}\033[0m")
-
-def draw_hand_skeleton(frame, kp_array, w, h):
-    points = kp_array.reshape(21, 3)
-    pixel_points = []
-    for p in points:
-        cx, cy = int(p[0] * w), int(p[1] * h)
-        pixel_points.append((cx, cy))
-        cv2.circle(frame, (cx, cy), 4, (0, 0, 255), -1) 
-    for connection in HAND_CONNECTIONS:
-        pt1 = pixel_points[connection[0]]
-        pt2 = pixel_points[connection[1]]
-        cv2.line(frame, pt1, pt2, (255, 0, 0), 2)
-    return pixel_points[0] # Trả về vị trí cổ tay để ghi chữ
 
 def main():
     global last_gesture_state, clap_count, last_clap_time, last_tilt_angle
@@ -174,9 +113,7 @@ def main():
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                 
                 current_hand_count = len(hand_positions)
-                # --- LOGIC FUSION CLAP (AUDIO + VISION) ---
-                # 1. Kiểm tra xem Audio có vừa nghe thấy tiếng vỗ tay không (trong 0.5s qua)
-                
+                # --- LOGIC FUSION CLAP  ---
                 if audio_ai.check_and_reset_clap():
                     # Kiểm tra Double Clap (2 cái trong vòng 1.5 giây)
                     if now - last_clap_time < 1.5:
@@ -185,7 +122,6 @@ def main():
                         clap_count = 1
                     
                     last_clap_time = now
-                    # print(f"--- [AUDIO AI] Vỗ tay lần {clap_count} ---")
 
                     if clap_count == 1:
                         send_mqtt_command("LIGHT_MODE_TOGGLE")
@@ -199,7 +135,6 @@ def main():
                     instant_label = current_frame_labels[0]
                     
                     # A. Fan Toggle (Palm -> Fist)
-                    # if last_gesture_state == palm_label and instant_label == fist_label:
                     if (last_gesture_state in ["5-rotate", "3-three"]) and instant_label == "4-open_close":
                         send_mqtt_command("FAN_ON_OFF_TOGGLE")
                     
@@ -214,8 +149,6 @@ def main():
                         angle_diff = abs(current_angle - last_tilt_angle)
                         
                         is_rotating = False
-                        # In ra để bạn debug xem góc đang là bao nhiêu
-                        # print(f"[DEBUG] Label: {instant_label} | Angle: {current_angle:.2f} | Diff: {angle_diff:.2f}")
 
                         # CHỈ xử lý xoay nếu nhãn nằm trong danh sách "nghi vấn" xoay tay
                         if instant_label in rotation_candidate_labels and angle_diff > 30: 
@@ -230,21 +163,7 @@ def main():
                             elif stable_label == "3-three": send_mqtt_command("SPEED_3")
                             elif stable_label == "7-victory": send_mqtt_command("TRACKING_ON")
                     last_gesture_state = instant_label
-                    # elif stable_label == "5-rotate": send_mqtt_command("OSCILLATION_MODE")
-                    # C. [FIX] LOGIC XOAY CỔ TAY (OSCILLATION)
-                    # elif instant_label == "5-rotate" and len(hand_keypoints_list) > 0:
-                    #     print(hand_keypoints_list)
-                    #     current_angle = calculate_tilt_angle(hand_keypoints_list[0])
-                        
-                    #     angle_diff = abs(current_angle - last_tilt_angle)
-                        
-                    #     # Chỉ gửi lệnh nếu góc xoay thay đổi đáng kể (> 25 độ)
-                    #     if angle_diff > 25:
-                    #         send_mqtt_command("OSCILLATION_MODE_TOGGLE")
-                    #         last_tilt_angle = current_angle # Cập nhật góc mới
-                    # # Cập nhật trạng thái cũ
-                    # last_gesture_state = instant_label
-                # Hiển thị số lần vỗ tay
+                    
                 cv2.putText(frame, f"Clap: {clap_count}", (nx1, y1 - 10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
