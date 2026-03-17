@@ -46,6 +46,7 @@ def draw_hand_skeleton_from_array(frame, kp_array, w, h):
 # ==========================================
 AIO_USERNAME = os.getenv("AIO_USERNAME")
 AIO_KEY = os.getenv("AIO_KEY")
+
 # Các tham số cấu hình và Ngưỡng mặc định
 current_temp = 0
 current_light = 0
@@ -96,6 +97,11 @@ def main():
     yolo_ai = HumanDetector(model_path='models/yolov8x.pt', conf_threshold=0.6)
     mp_ai = HandExtractor(mp_model='models/gesture_recognizer.task')
 
+    cap = cv2.VideoCapture(1) 
+    if not cap.isOpened():
+        print("[ERROR] Không thể mở Camera!")
+        sys.exit(1)
+    
     # 2. KHỞI TẠO MQTT CLIENT
     print("[SYSTEM] Khởi tạo kết nối MQTT...")
     client = MQTTClient(AIO_USERNAME, AIO_KEY)
@@ -116,26 +122,37 @@ def main():
     DELAY_TURN_OFF = 3.0          
     UPDATE_TIME = 10.0            
 
-    # 4. BIẾN QUẢN LÝ FPS & MEDIAPIPE
-    frame_count = 0
-    cached_final_data = {}
-    fps_start_time = time.time()
-    display_fps = 0
-
     print("[SYSTEM] Hệ thống đã sẵn sàng hoạt động. Bấm 'q' để thoát.")
 
-    while True:
-        # --- Bước 1: HUMAN DETECTOR trả về 3 thứ: trạng thái có người hay không, frame đã vẽ bounding box, và dictionary chứa bounding box của từng người (key là track_id) ---
-        trang_thai_hien_dien, frame, persons_bbox = yolo_ai.scan_and_display()
-        if trang_thai_hien_dien == -1: 
-            print("[HUMAN_DETECTION_ERROR] Mất kết nối Camera!")
-            break
-
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret: break
+        
+        frame = cv2.flip(frame, 1) 
         current_time = time.time()
-        h, w, _ = frame.shape
-        frame_count += 1
+        timestamp_ms = int(current_time * 1000)
 
-        # --- BƯỚC 2: LOGIC LỌC NHIỄU (DEBOUNCE) CHO IOT ---
+        # 1. Gửi frame cho YOLO và MediaPipe xử lý 
+        yolo_ai.update_frame(frame)
+        mp_ai.process_frame_async(frame, timestamp_ms)
+
+        # 2. Lấy kết quả từ các threads
+        trang_thai_hien_dien, persons_bbox = yolo_ai.get_latest_results()
+        
+        # Lấy thêm mp_frame và mp_fps từ MediaPipe
+        hands_data, gestures_data, mp_frame, mp_fps = mp_ai.get_latest_results()
+
+        # Nếu MediaPipe chưa kịp xử lý frame đầu tiên, dùng tạm frame camera
+        if mp_frame is not None:
+            display_frame = mp_frame.copy()
+            fps_to_show = mp_fps
+        else:
+            display_frame = frame.copy()
+            fps_to_show = 0
+
+        h, w = display_frame.shape[:2] # Lấy kích thước của khung hình dùng để vẽ
+
+        # --- BƯỚC 4: LOGIC MQTT IOT ---
         if trang_thai_hien_dien == 1:
             last_seen_time = current_time
             trang_thai_chinh_thuc = 1
@@ -145,7 +162,6 @@ def main():
             else:
                 trang_thai_chinh_thuc = 1 
 
-        # --- BƯỚC 3: XỬ LÝ PUBLISH MQTT & DATABASE ---
         if (trang_thai_chinh_thuc != last_state) or (current_time - mqtt_last_time > UPDATE_TIME):
             print(f"[{time.strftime('%H:%M:%S')}] Trang thái chính thức: {trang_thai_chinh_thuc}")
             client.publish("human-detect-ai", trang_thai_chinh_thuc)
@@ -167,38 +183,34 @@ def main():
             last_state = trang_thai_chinh_thuc
             mqtt_last_time = current_time
 
-        # --- BƯỚC 4: XỬ LÝ MEDIAPIPE LẤY KEYPOINT ---
-        if trang_thai_hien_dien == 1:
-            timestamp_ms = int(current_time * 1000)
-            final_data = mp_ai.extract_hands(frame, persons_bbox, timestamp_ms)
 
-            # Vẽ xương tay và ID
-            for track_id, data in final_data.items():
-                x1, y1, x2, y2 = data["bbox"]
-                hands_count = len(data["hands"])
-                
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {track_id} - Tay: {hands_count}", 
-                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-                for hand_array in data["hands"]:
-                    draw_hand_skeleton_from_array(frame, hand_array, w, h)
-        else:
-            final_data = {}
-
-        # --- BƯỚC 5: TÍNH TOÁN FPS VÀ SHOW ẢNH ---
-        elapsed_time = time.time() - fps_start_time
-        if elapsed_time > 0:
-            display_fps = 1 / elapsed_time
-        fps_start_time = time.time()
+        # --- BƯỚC 5 & 6: VẼ MỌI THỨ LÊN DISPLAY_FRAME ---
         
-        cv2.putText(frame, f"FPS: {int(display_fps)}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+        # Vẽ YOLO bb
+        if persons_bbox:
+            for track_id, bbox in persons_bbox.items():
+                x1, y1, x2, y2 = bbox
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(display_frame, f"ID: {track_id}", (x1, y1 - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow("Smart Home AI", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        # Vẽ MediaPipe keypoints và gesture
+        for idx, hand_array in enumerate(hands_data):
+            draw_hand_skeleton_from_array(display_frame, hand_array, w, h)
+            gesture = gestures_data[idx] if idx < len(gestures_data) else "None"
+            cv2.putText(display_frame, f"Gest: {gesture}", (20, 100 + (idx*40)), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
 
-    # Dọn dẹp tài nguyên
+        # In FPS của chính MediaPipe
+        cv2.putText(display_frame, f"MP FPS: {fps_to_show}", (20, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+        # Hiển thị
+        cv2.imshow("Smart Home", display_frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'): break
+
+    # Dọn dẹp
+    cap.release()
     yolo_ai.cleanup()
     mp_ai.cleanup()
     cv2.destroyAllWindows()
