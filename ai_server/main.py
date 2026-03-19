@@ -10,7 +10,7 @@ from Adafruit_IO import MQTTClient
 from dotenv import load_dotenv
 
 from modules.human_detection.human_detector import HumanDetector
-from modules.motion_detection.kp_extractor import HandExtractor
+from modules.motion_detection.handlers.kp_extractor import HandExtractor
 from database.db_manager import DatabaseManager 
 
 load_dotenv()
