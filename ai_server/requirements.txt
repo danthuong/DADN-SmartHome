@@ -3,10 +3,16 @@ onnxruntime
 opencv-python
 numpy
 deep-sort-realtime
-torch
+
+# PyTorch (GPU)
+torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
 fastapi
 uvicorn
 python-multipart
 pydantic
+
 mediapipe
 ultralytics
+
+python-dotenv
