@@ -307,6 +307,7 @@ Sau khi đã chụp và lưu ảnh vào thư mục `baseImg/`, tiến hành đă
 
 ```bash
 python -m modules.face_recognition.test.test_register_face
+python -m modules.face_recognition.backend.app
 ```
 
 ---
@@ -388,7 +389,6 @@ location: house_A
 ```bash
 cd ai_server
 venv\Scripts\activate
-uvicorn modules.face_recognition.backend.CAM_simulation:app --host 0.0.0.0 --port 7000
 uvicorn modules.face_recognition.backend.AI_backend:app --host 0.0.0.0 --port 8000
 uvicorn modules.face_recognition.backend.CAM_backend:app --host 0.0.0.0 --port 9000
 ```

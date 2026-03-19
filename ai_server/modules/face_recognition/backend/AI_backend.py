@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from fastapi import FastAPI, UploadFile, File, Form
 from models.model import ModelFactory
+from database.CameraAccountDb import JSONCameraAccountDb
 from database.FRDb import (
     Info,
     DbFactory,
@@ -45,14 +46,16 @@ dbConfig = JSONDbConfig(
     "frdb.json",
     "images"
 )
-
 db = DbFactory.create("jsonDb", dbConfig)
+
+camera_account_db = JSONCameraAccountDb("camera_accounts.json")
+
 
 similarity = CosineSimilarity()
 
 # cache embeddings theo location
-location_cache = {}
-
+cam_server_cache = {}
+temp_faces = {}
 # ===============================
 # Utils
 # ===============================
@@ -64,19 +67,21 @@ async def read_frame(file: UploadFile):
     return frame
 
 
-def load_known_faces(location):
+def load_known_faces(cam_server_id):
 
-    if location not in location_cache:
+    if cam_server_id not in cam_server_cache:
 
-        print(f"Loading embeddings for location: {location}")
+        print(f"Loading embeddings for cam_server_id: {cam_server_id}")
 
-        knowFaces = db.getEmbedding(Info(location=location))
+        knowFaces = db.getEmbedding(
+            Info(cam_server_id=cam_server_id)
+        )
 
         knowFaces = preprocessing(knowFaces, device)
 
-        location_cache[location] = knowFaces
+        cam_server_cache[cam_server_id] = knowFaces
 
-    return location_cache[location]
+    return cam_server_cache[cam_server_id]
 
 
 def preprocessing(knowFaces, device):
@@ -130,7 +135,7 @@ def preprocessing(knowFaces, device):
 @app.post("/detect")
 async def detect(
     file: UploadFile = File(...),
-    location: str = Form(...)
+    cam_server_id: str = Form(...)
 ):
 
     frame = await read_frame(file)
@@ -138,7 +143,7 @@ async def detect(
     if frame is None:
         return []
 
-    knowFaces = load_known_faces(location)
+    knowFaces = load_known_faces(cam_server_id)
 
     faces = model.detect(frame)
 
@@ -201,3 +206,95 @@ async def detect(
         })
 
     return results
+
+@app.get("/cameras")
+def get_cameras(account: str):
+
+    servers = camera_account_db.get_servers(account)
+
+    return {
+        "account": account,
+        "servers": servers
+    }
+
+from ..utils.utils import detect_face, crop_face, add_face
+import base64
+import uuid
+@app.post("/register/detect")
+async def detect_register_faces(
+    file: UploadFile = File(...)
+):
+
+    frame = await read_frame(file)
+
+    if frame is None:
+        return {"faces": []}
+
+    faces = detect_face(model, frame)
+
+    if len(faces) == 0:
+        return {"faces": []}
+
+    cropped_faces = crop_face(frame, faces)
+
+    results = []
+
+    for face_img, face in cropped_faces:
+
+        face_id = str(uuid.uuid4())
+
+        temp_faces[face_id] = (face_img, face)
+
+        _, buffer = cv2.imencode(".jpg", face_img)
+
+        face_base64 = base64.b64encode(buffer).decode()
+
+        results.append({
+            "face_id": face_id,
+            "image": face_base64
+        })
+
+    return {
+        "faces": results
+    }
+
+from pydantic import BaseModel
+from typing import Optional, List
+
+class FaceRegister(BaseModel):
+    face_id: str
+    name: str
+    cam_server_id: Optional[str] = None
+
+
+class RegisterRequest(BaseModel):
+    faces: List[FaceRegister]
+
+@app.post("/register/save")
+def register_faces(req: RegisterRequest):
+
+    face_list = []
+
+    for f in req.faces:
+
+        if f.face_id not in temp_faces:
+            continue
+
+        face_img, face = temp_faces[f.face_id]
+
+        info = Info(
+            name=f.name if f.name else None,
+            cam_server_id=f.cam_server_id if f.cam_server_id else None
+        )
+
+        face_list.append((face_img, face, info))
+
+    if len(face_list) == 0:
+        return {"saved_ids": []}
+
+    ids = add_face(db, face_list)
+    cam_server_cache.clear()
+
+    return {
+        "saved_ids": ids
+    }

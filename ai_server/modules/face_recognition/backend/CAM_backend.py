@@ -15,6 +15,7 @@ import os
 app = FastAPI()
 
 camera_workers = {}
+camera_registry = {}
 output_frames = {}
 frame_locks = {}
 
@@ -39,13 +40,13 @@ class RegisterRequest(BaseModel):
 # ==============================
 # Camera Worker
 # ==============================
-DISPLAY_LOCAL = True   # bật/tắt hiển thị màn hình local
+DISPLAY_LOCAL = False   # bật/tắt hiển thị màn hình local
 
 import threading
 import time
 from queue import Queue, Empty
 
-def camera_worker(camera_id, camera_url, location, room):
+def camera_worker(camera_id, camera_url, cam_server_id, location, room):
 
     session = requests.Session()
     print(f"[INFO] Starting camera {camera_id}")
@@ -126,7 +127,7 @@ def camera_worker(camera_id, camera_url, location, room):
                 response = session.post(
                     AI_URL,
                     files={"file": buffer.tobytes()},
-                    data={"location": location},
+                    data={"cam_server_id": cam_server_id},
                     timeout=10
                 )
 
@@ -295,7 +296,7 @@ def load_config():
 def start_cameras():
 
     config = load_config()
-
+    cam_server_id = config["cam_server_id"]
     location = config["location"]
 
     for cam in config["cameras"]:
@@ -307,9 +308,17 @@ def start_cameras():
         frame_locks[camera_id] = threading.Lock()
         output_frames[camera_id] = None
 
+        camera_registry[camera_id] = {
+            "url": camera_url,
+            "cam_server_id": cam_server_id,
+            "location": location,
+            "room": room,
+            "status": "online"
+        }
+
         thread = threading.Thread(
             target=camera_worker,
-            args=(camera_id, camera_url, location, room),
+            args=(camera_id, camera_url, cam_server_id, location, room),
             daemon=True
         )
 
@@ -321,3 +330,28 @@ def start_cameras():
 @app.on_event("startup")
 def startup_event():
     start_cameras()
+
+from fastapi import Request
+
+@app.get("/cameras")
+def list_cameras(request: Request):
+
+    base_url = str(request.base_url)
+
+    cameras = []
+
+    for camera_id, meta in camera_registry.items():
+
+        cameras.append({
+            "camera_id": camera_id,
+            "cam_server_id": meta["cam_server_id"],
+            "location": meta["location"],
+            "room": meta["room"],
+            "status": meta["status"],
+            "stream_url": f"{base_url}video/{camera_id}"
+        })
+
+    return {
+        "total": len(cameras),
+        "cameras": cameras
+    }

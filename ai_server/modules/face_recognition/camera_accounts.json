@@ -1,0 +1,13 @@
+[
+  {
+    "account": "TuanDuy",
+    "pwd": "12345",
+    "servers": [
+      {
+        "cam_server_id": "server_221b",
+        "location": "221B Baker Street, Marylebone, London, UK",
+        "url": "http://localhost:9000"
+      }
+    ]
+  }
+]

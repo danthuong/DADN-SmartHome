@@ -21,7 +21,6 @@ venv/
 *.onnx
 *.dat
 
-ai_server/models/*
 !ai_server/models/.gitkeep
 
 # ===============================
