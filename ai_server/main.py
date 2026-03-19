@@ -102,23 +102,24 @@ while True:
         client.publish("human-detect-ai", trang_thai_chinh_thuc)
         
         # Lưu Log cảm biến AI
-        db.log_sensor("AI_CAM", trang_thai_chinh_thuc, user_name="Thinh") # Sau này thay bằng tên thật từ AI
+        db.log_camera(camera_id="CAM_01", has_human=trang_thai_chinh_thuc)
 
-        # LOGIC TINH CHỈNH THIẾT BỊ (Đây là phần báo cáo của bạn)
+        # LOGIC TINH CHỈNH THIẾT BỊ
         if trang_thai_chinh_thuc == 1:
             # Kiểm tra nhiệt độ
             status_fan = 1 if current_temp > threshold_temp else 0
-            reason_fan = f"HOT: {current_temp}C > {threshold_temp}C" if status_fan else f"COOL: {current_temp}C <= {threshold_temp}C"
-            db.log_device("FAN", status_fan, reason_fan, threshold_temp)
+            # Tạo trigger_source rõ ràng, ví dụ: "YOLO_Auto_32.5C"
+            trigger_fan = f"YOLO_Auto_{current_temp}C"
+            db.log_device("FAN", status_fan, trigger_source=trigger_fan)
             
             # Kiểm tra ánh sáng
             status_led = 1 if current_light < threshold_light else 0
-            reason_led = f"DARK: {current_light}lux < {threshold_light}lux" if status_led else f"BRIGHT: {current_light}lux >= {threshold_light}lux"
-            db.log_device("LED", status_led, reason_led, threshold_light)
+            trigger_led = f"YOLO_Auto_{current_light}lux"
+            db.log_device("LED", status_led, trigger_source=trigger_led)
         else:
             # Không có người thì mặc định lưu log Tắt
-            db.log_device("FAN", 0, "Phát hiện không có người", threshold_temp)
-            db.log_device("LED", 0, "Phát hiện không có người", threshold_light)
+            db.log_device("FAN", 0, trigger_source="YOLO_NoHuman_Timeout")
+            db.log_device("LED", 0, trigger_source="YOLO_NoHuman_Timeout")
 
         last_state = trang_thai_chinh_thuc
         last_time = current_time
