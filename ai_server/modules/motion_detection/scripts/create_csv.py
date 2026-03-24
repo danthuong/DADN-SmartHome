@@ -1,63 +1,152 @@
-import cv2
-import mediapipe as mp
 import os
 import csv
+import cv2
 import numpy as np
+import mediapipe as mp
 
-# Khởi tạo MediaPipe
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_confidence=0.5)
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+
+
+# ===============================
+# Initialize MediaPipe HandLandmarker
+# ===============================
+
+base_options = python.BaseOptions(
+    model_asset_path="../../models/hand_landmarker.task"
+)
+
+options = vision.HandLandmarkerOptions(
+    base_options=base_options,
+    num_hands=1
+)
+
+detector = vision.HandLandmarker.create_from_options(options)
+
+
+# ===============================
+# Landmark normalization
+# ===============================
 
 def preprocess_landmarks(landmark_list):
-    """Chuẩn hóa landmark: Dời gốc về cổ tay và scale theo kích thước tay"""
+    """
+    Chuẩn hóa landmark:
+    1. Dời gốc về cổ tay
+    2. Scale theo kích thước bàn tay
+    """
+
     temp_landmark_list = []
-    # 1. Dời gốc tọa độ về điểm số 0 (Cổ tay)
-    base_x, base_y = landmark_list[0][0], landmark_list[0][1]
+
+    base_x, base_y = landmark_list[0]
+
     for x, y in landmark_list:
         temp_landmark_list.append([x - base_x, y - base_y])
 
-    # 2. Chuẩn hóa khoảng cách (Scale)
-    # Tính khoảng cách lớn nhất để đưa về đoạn [0, 1]
     max_value = max([max(abs(x), abs(y)) for x, y in temp_landmark_list])
-    if max_value == 0: max_value = 1
-    
-    return [n / max_value for sublist in temp_landmark_list for n in sublist]
+
+    if max_value == 0:
+        max_value = 1
+
+    normalized = []
+
+    for x, y in temp_landmark_list:
+        normalized.append(x / max_value)
+        normalized.append(y / max_value)
+
+    return normalized
+
+
+# ===============================
+# Extract landmarks from image
+# ===============================
+
+def extract_landmarks(img_path):
+
+    try:
+        image = mp.Image.create_from_file(img_path)
+
+        result = detector.detect(image)
+
+        if not result.hand_landmarks:
+            return None
+
+        hand = result.hand_landmarks[0]
+
+        landmark_list = []
+
+        for lm in hand:
+            landmark_list.append([lm.x, lm.y])
+
+        return preprocess_landmarks(landmark_list)
+
+    except:
+        return None
+
+
+# ===============================
+# Dataset extraction
+# ===============================
 
 def run_extraction(data_dir, output_file):
-    with open(output_file, 'w', newline='') as f:
+
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    with open(output_file, "w", newline="") as f:
+
         writer = csv.writer(f)
-        # Header: 42 cột (21 điểm x 2 tọa độ x,y) + 1 cột nhãn
+
         header = [f"p{i}_{axis}" for i in range(21) for axis in ["x", "y"]] + ["label"]
         writer.writerow(header)
 
-        # Duyệt qua các thư mục 1-one, 2-two...
+        total_images = 0
+        success = 0
+
         for category in sorted(os.listdir(data_dir)):
+
             cat_path = os.path.join(data_dir, category)
-            if not os.path.isdir(cat_path) or "6-clap" in category:
+
+            if not os.path.isdir(cat_path):
                 continue
-            
-            print(f"--- Đang xử lý nhãn: {category} ---")
-            
-            # Dùng os.walk để tìm hết ảnh trong mọi thư mục con (như two_up, two_up_inverted)
+
+            if category == "6-clap":
+                continue
+
+            print(f"\n--- Processing label: {category} ---")
+
             for root, dirs, files in os.walk(cat_path):
+
                 for filename in files:
-                    if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        img_path = os.path.join(root, filename)
-                        image = cv2.imread(img_path)
-                        if image is None: continue
-                        
-                        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                        results = hands.process(image_rgb)
 
-                        if results.multi_hand_landmarks:
-                            for hand_landmarks in results.multi_hand_landmarks:
-                                landmark_list = [[lm.x, lm.y] for lm in hand_landmarks.landmark]
-                                # Chuẩn hóa dữ liệu
-                                processed_data = preprocess_landmarks(landmark_list)
-                                # Ghi vào CSV
-                                writer.writerow(processed_data + [category])
+                    if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
+                        continue
 
-    print(f"Xong! Dữ liệu đã lưu vào {output_file}")
+                    img_path = os.path.join(root, filename)
 
-# Chạy lệnh (Thay 'data' bằng tên thư mục chứa các folder 1-one, 2-two...)
-run_extraction('D:\DADN\DADN-SmartHome\\ai_server\modules\motion_detection\data', 'hand_gestures.csv')
+                    total_images += 1
+
+                    features = extract_landmarks(img_path)
+
+                    if features is None:
+                        continue
+
+                    writer.writerow(features + [category])
+                    success += 1
+
+    print("\n==============================")
+    print("Hoàn thành quá trình trích xuất")
+    print("Tổng số ảnh:", total_images)
+    print("Hoàn thành việc nhận diện:", success)
+    print("Đã lưu vào:", output_file)
+    print("==============================")
+
+
+# ===============================
+# Run script
+# ===============================
+
+if __name__ == "__main__":
+
+    run_extraction(
+        "../../data/raw",
+        "../../data/processed/hand_gestures.csv"
+    )
