@@ -111,16 +111,18 @@ while True:
             # Tạo trigger_source rõ ràng, ví dụ: "YOLO_Auto_32.5C"
             trigger_fan = f"YOLO_Auto_{current_temp}C"
             db.log_device("FAN", status_fan, trigger_source=trigger_fan)
-            
+            client.publish("device-fan", status_fan)
             # Kiểm tra ánh sáng
             status_led = 1 if current_light < threshold_light else 0
             trigger_led = f"YOLO_Auto_{current_light}lux"
             db.log_device("LED", status_led, trigger_source=trigger_led)
+            client.publish("device-led", status_led)
         else:
             # Không có người thì mặc định lưu log Tắt
             db.log_device("FAN", 0, trigger_source="YOLO_NoHuman_Timeout")
             db.log_device("LED", 0, trigger_source="YOLO_NoHuman_Timeout")
-
+            client.publish("device-fan", 0)
+            client.publish("device-led", 0)
         last_state = trang_thai_chinh_thuc
         last_time = current_time
     
