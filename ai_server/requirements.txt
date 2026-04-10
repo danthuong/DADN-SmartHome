@@ -1,24 +1,14 @@
-# ==========================================
-# 1. AI & Computer Vision (Team YOLO)
-# ==========================================
-opencv-python
-ultralytics
-
-# ==========================================
-# 2. IoT & Hardware (Team YoloBit/Micro:bit)
-# ==========================================
 adafruit-io
 pyserial
-
-# ==========================================
-# 3. Backend API Server (Làm cầu nối cho App)
-# ==========================================
 fastapi
 uvicorn
-
-# ==========================================
-# 4. Bảo mật & Xác thực (Authentication/JWT)
-# ==========================================
 PyJWT
 passlib
 bcrypt==3.2.2
+mediapipe
+opencv-python
+numpy
+ultralytics
+torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+python-dotenv
+request

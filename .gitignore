@@ -21,14 +21,13 @@ venv/
 *.onnx
 *.dat
 
-ai_server/models/*
 !ai_server/models/.gitkeep
 
 # ===============================
 # Database
 # ===============================
-ai_server/database/*.db
-
+*.db
+ai_server/modules/motion_detection/data/*
 # ===============================
 # ESP32 / Microcontroller
 # ===============================

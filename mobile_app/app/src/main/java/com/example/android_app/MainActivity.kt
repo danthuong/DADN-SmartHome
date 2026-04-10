@@ -1,21 +1,17 @@
 package com.example.android_app
 
 import android.Manifest
+import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.navigation.NavType
-import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
+import com.example.android_app.data.SmartHomeRepository
 import com.example.android_app.data.User
 import com.example.android_app.ui.screens.*
 import com.example.android_app.ui.theme.Android_appTheme
@@ -25,22 +21,50 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean -> }
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SmartHomeRepository.init(this)
+
+        val sharedPref = getSharedPreferences("UserPrefs", Context.MODE_PRIVATE)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         setContent {
-            // 1. Khai báo trạng thái Theme và Ngôn ngữ toàn cục
-            var themeChoice by remember { mutableStateOf("system") }
-            var languageChoice by remember { mutableStateOf(AppLanguage.VI) }
+            // SỬA LỖI 1: Lấy đúng giá trị từ SharedPreferences để khởi tạo State
+            val savedTheme = sharedPref.getString("theme_choice", "system") ?: "system"
+            val savedLangString = sharedPref.getString("lang_choice", "VI") ?: "VI"
+            val savedLanguage = try {
+                AppLanguage.valueOf(savedLangString)
+            } catch (e: Exception) {
+                AppLanguage.VI
+            }
+            val savedUsername = sharedPref.getString("saved_username", null)
 
-            // 2. Lấy bộ chữ và cấu hình Dark Mode dựa trên State
+            // Gán giá trị đã lưu vào mutableStateOf
+            var themeChoice by remember { mutableStateOf(savedTheme) }
+            var languageChoice by remember { mutableStateOf(savedLanguage) }
             val strings = if (languageChoice == AppLanguage.VI) VietnameseStrings else EnglishStrings
+
+            // SỬA LỖI 2: Nếu đã lưu user (vào thẳng dashboard), phải load data cho Repository
+            LaunchedEffect(savedUsername) {
+                if (savedUsername != null) {
+                    SmartHomeRepository.loadUserData(savedUsername, strings)
+                }
+            }
+
+            LaunchedEffect(languageChoice) {
+                sharedPref.edit().putString("lang_choice", languageChoice.name).apply()
+                SmartHomeRepository.updateLanguage(strings)
+            }
+
+            LaunchedEffect(themeChoice) {
+                sharedPref.edit().putString("theme_choice", themeChoice).apply()
+            }
+
             val isDark = when (themeChoice) {
                 "light" -> false
                 "dark" -> true
@@ -53,7 +77,9 @@ class MainActivity : ComponentActivity() {
                     onThemeChange = { themeChoice = it },
                     currentLanguage = languageChoice,
                     onLanguageChange = { languageChoice = it },
-                    strings = strings
+                    strings = strings,
+                    sharedPref = sharedPref,
+                    savedUsername = savedUsername // Truyền savedUsername vào Navigation
                 )
             }
         }
@@ -66,20 +92,40 @@ fun AppNavigation(
     onThemeChange: (String) -> Unit,
     currentLanguage: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit,
-    strings: AppStrings // Nhận bộ chữ từ MainActivity
+    strings: AppStrings,
+    sharedPref: SharedPreferences,
+    savedUsername: String?
 ) {
-    val navController = rememberNavController()
-    // Lưu trữ User sau khi login hoặc signup
-    var currentUser by remember { mutableStateOf<User?>(null) }
+    val navController = androidx.navigation.compose.rememberNavController()
 
-    NavHost(navController = navController, startDestination = "login") {
+    // Tìm user từ Database giả lập
+    val userFromDb = remember(savedUsername) {
+        com.example.android_app.data.MockDatabase.users.find { it.username == savedUsername }
+    }
 
-        // --- MÀN HÌNH LOGIN ---
+    // SỬA LỖI 3: Xử lý trường hợp MockDatabase bị reset khi khởi động lại app
+    var currentUser by remember { mutableStateOf<User?>(userFromDb) }
+
+    // Nếu có username lưu trong máy NHƯNG userFromDb = null (do MockDB bị xóa khi tắt app)
+    // thì phải bắt người dùng quay lại màn hình Login, nếu không Dashboard sẽ bị trắng.
+    val initialDestination = if (savedUsername != null && userFromDb != null) {
+        "dashboard"
+    } else {
+        "login"
+    }
+
+    androidx.navigation.compose.NavHost(
+        navController = navController,
+        startDestination = initialDestination
+    ) {
         composable("login") {
             LoginScreen(
                 strings = strings,
-                onLoginSuccess = { userObj ->
+                onLoginSuccess = { userObj : User ->
+                    SmartHomeRepository.loadUserData(userObj.username, strings)
                     currentUser = userObj
+                    sharedPref.edit().putString("saved_username", userObj.username).apply()
+
                     navController.navigate("dashboard") {
                         popUpTo("login") { inclusive = true }
                     }
@@ -88,12 +134,15 @@ fun AppNavigation(
             )
         }
 
-        // --- MÀN HÌNH SIGNUP ---
         composable("signup") {
             SignUpScreen(
                 strings = strings,
                 onSignUpSuccess = { userObj ->
+                    sharedPref.edit().putString("saved_username", userObj.username).apply()
                     currentUser = userObj
+                    // Cần load data cho repository sau khi đăng ký thành công
+                    SmartHomeRepository.loadUserData(userObj.username, strings)
+
                     navController.navigate("dashboard") {
                         popUpTo("signup") { inclusive = true }
                     }
@@ -102,67 +151,31 @@ fun AppNavigation(
             )
         }
 
-        // --- MÀN HÌNH DASHBOARD ---
         composable("dashboard") {
-            currentUser?.let { user ->
+            if (currentUser != null) {
                 DashboardScreen(
-                    user = user,
+                    user = currentUser!!,
                     strings = strings,
                     onProfileClick = { navController.navigate("profile") },
                     onSettingsClick = { navController.navigate("settings") },
                     onLogout = {
+                        sharedPref.edit().remove("saved_username").apply()
                         currentUser = null
                         navController.navigate("login") { popUpTo(0) }
                     },
-                    // [MỚI] Khi bấm vào thiết bị -> Chuyển sang màn hình chi tiết kèm ID
-                    onDeviceClick = { deviceId ->
-                        navController.navigate("device_detail/$deviceId")
-                    },
-                    // [MỚI] Khi bấm tạo Preset -> Chuyển sang màn hình tạo Preset
-                    onNavigateToCreatePreset = {
-                        navController.navigate("create_preset")
-                    },
-                    onNavigateToEditPreset = { pid -> navController.navigate("edit_preset/$pid") }
+                    onDeviceClick = { /* ... */ },
+                    onNavigateToCreatePreset = { navController.navigate("create_preset") },
+                    onNavigateToEditPreset = { pid -> navController.navigate("edit_preset/$pid") },
                 )
+            } else {
+                // Đề phòng trường hợp bất thường currentUser null ở đây, văng ra login
+                LaunchedEffect(Unit) {
+                    sharedPref.edit().remove("saved_username").apply()
+                    navController.navigate("login") { popUpTo(0) }
+                }
             }
         }
 
-        // --- MÀN HÌNH CHI TIẾT THIẾT BỊ ---
-        composable(
-            route = "device_detail/{deviceId}",
-            arguments = listOf(navArgument("deviceId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            // Lấy ID từ đường dẫn
-            val deviceId = backStackEntry.arguments?.getString("deviceId") ?: ""
-            DeviceDetailScreen(
-                deviceId = deviceId,
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        // --- ROUTE TẠO PRESET ---
-        composable("create_preset") {
-            CreatePresetScreen(
-                strings = strings,
-                presetIdToEdit = null,
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        // Route chỉnh sửa (có ID)
-        composable(
-            route = "edit_preset/{presetId}",
-            arguments = listOf(navArgument("presetId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val pid = backStackEntry.arguments?.getString("presetId")
-            CreatePresetScreen(
-                strings = strings,
-                presetIdToEdit = pid,
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        // --- MÀN HÌNH SETTINGS ---
         composable("settings") {
             SettingsScreen(
                 strings = strings,
@@ -172,28 +185,49 @@ fun AppNavigation(
                 onLanguageChange = onLanguageChange,
                 onPasswordChange = { old, new ->
                     if (currentUser?.password == old) {
-                        // Cập nhật pass mới vào đối tượng đang đăng nhập
                         currentUser = currentUser?.copy(password = new)
                         true
                     } else false
                 },
+                onNavigateToFaceScan = { navController.navigate("face_scan") },
                 onBack = { navController.popBackStack() }
             )
         }
 
-        // --- MÀN HÌNH PROFILE ---
         composable("profile") {
             currentUser?.let { user ->
                 ProfileScreen(
                     user = user,
-                    strings = strings, // Truyền strings vào Profile
+                    strings = strings,
                     onBack = { navController.popBackStack() },
                     onLogout = {
+                        sharedPref.edit().remove("saved_username").apply()
                         currentUser = null
                         navController.navigate("login") { popUpTo(0) }
                     }
                 )
             }
+        }
+
+        composable(
+            route = "edit_preset/{presetId}",
+            arguments = listOf(androidx.navigation.navArgument("presetId") {
+                type = androidx.navigation.NavType.StringType
+            })
+        ) { backStackEntry ->
+            val pid = backStackEntry.arguments?.getString("presetId")
+            CreatePresetScreen(
+                strings = strings,
+                presetIdToEdit = pid,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("face_scan") {
+            FaceRecognitionScreen(
+                strings = strings,
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }
