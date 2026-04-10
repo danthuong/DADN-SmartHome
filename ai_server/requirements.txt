@@ -4,11 +4,6 @@ opencv-python
 numpy
 deep-sort-realtime
 
-# PyTorch CPU
-torch
-torchvision
-torchaudio
-
 fastapi
 uvicorn
 python-multipart
@@ -18,3 +13,10 @@ mediapipe
 ultralytics
 
 python-dotenv
+requests
+
+# PyTorch CUDA 12.1
+--index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio
