@@ -75,7 +75,12 @@ class DatabaseManager:
         # Nạp sẵn Camera mặc định và các thiết bị IoT
         self.cursor.execute("INSERT OR IGNORE INTO cameras VALUES ('CAM_01', 'Phòng Khách')")
         sensors = [('PIR', 'Cảm biến hồng ngoại'), ('TEMP', 'Cảm biến nhiệt độ'), ('LIGHT', 'Cảm biến ánh sáng')]
-        devices = [('FAN', 'Quạt thông gió'), ('LED', 'Đèn chiếu sáng')]
+        devices = [
+            ('FAN', 'Quạt thông gió'), 
+            ('LED', 'Đèn chiếu sáng'),
+            ('SET_TEMP', 'Ngưỡng nhiệt độ (App)'),  # Thiết bị ảo 1 - tượng trưng ngưỡng
+            ('SET_LIGHT', 'Ngưỡng ánh sáng (App)')  
+        ]
         
         self.cursor.executemany("INSERT OR IGNORE INTO sensors VALUES (?,?)", sensors)
         self.cursor.executemany("INSERT OR IGNORE INTO devices VALUES (?,?)", devices)
