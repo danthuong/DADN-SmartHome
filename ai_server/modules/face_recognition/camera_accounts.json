@@ -1,7 +1,7 @@
 [
   {
-    "account": "TuanDuy",
-    "pwd": "12345",
+    "account": "account",
+    "pwd": "123456789",
     "servers": [
       {
         "cam_server_id": "server_221b",

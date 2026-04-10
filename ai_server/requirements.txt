@@ -4,8 +4,10 @@ opencv-python
 numpy
 deep-sort-realtime
 
-# PyTorch (GPU)
-torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# PyTorch CPU
+torch
+torchvision
+torchaudio
 
 fastapi
 uvicorn

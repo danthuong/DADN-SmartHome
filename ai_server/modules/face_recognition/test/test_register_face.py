@@ -1,9 +1,9 @@
 import os
 import cv2
-from models.model import FRModel
+from ai_server.models.recognition import FRModel
 from database.FRDb import FRDb, Info, DbFactory
 from ..utils.utils import detect_face, crop_face, add_face 
-from models.model import ModelFactory
+from ai_server.models.recognition import ModelFactory
 from modules.face_recognition.config.config import Retina_ArcConfig, JSONDbConfig
 
 def choose_faces_and_input_info(cropped_faces):

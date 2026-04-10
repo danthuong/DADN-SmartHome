@@ -26,7 +26,7 @@ def login(username, password):
     global BACKEND_URL
     global cam_servers
 
-    if username != "TuanDuy" or password != "12345":
+    if username != "account" or password != "123456789":
         messagebox.showerror("Login Failed", "Invalid account")
         return False
 
