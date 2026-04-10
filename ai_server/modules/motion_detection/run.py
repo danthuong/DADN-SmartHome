@@ -269,6 +269,27 @@ class PersonState:
         # BUFFER LƯU 30 DỰ ĐOÁN GẦN NHẤT ĐỂ ĐEM ĐI VOTING
         self.dynamic_buffer = collections.deque(maxlen=30) 
 
+# ==========================================
+# CLASS QUẢN LÝ TRẠNG THÁI CHO TỪNG NGƯỜI
+# ==========================================
+class PersonState:
+    def __init__(self):
+        # Buffer cho models
+        # motion buffer là cho GRU, gesture buffer là cho XGBoost
+        self.motion_buffer = collections.deque(maxlen=TARGET_FRAMES)
+        self.gesture_buffer = collections.deque(maxlen=15)
+        
+        # Trạng thái cơ bản
+        self.last_gesture_state = "none"
+        self.override_timer = 0
+
+        # Hold-to-confirm (Yêu cầu giữ tư thế 1.5 giây)
+        self.current_continuous_gesture = "none" 
+        self.gesture_start_time = 0
+
+        # BUFFER LƯU 30 DỰ ĐOÁN GẦN NHẤT ĐỂ ĐEM ĐI VOTING
+        self.dynamic_buffer = collections.deque(maxlen=30) 
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
