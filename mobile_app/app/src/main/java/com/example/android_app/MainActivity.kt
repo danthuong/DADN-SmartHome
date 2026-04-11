@@ -16,6 +16,8 @@ import com.example.android_app.data.User
 import com.example.android_app.ui.screens.*
 import com.example.android_app.ui.theme.Android_appTheme
 import com.example.android_app.utils.*
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -28,6 +30,9 @@ class MainActivity : ComponentActivity() {
         SmartHomeRepository.init(this)
 
         val sharedPref = getSharedPreferences("UserPrefs", Context.MODE_PRIVATE)
+
+        // Load saved token for auto-login restoration
+        SmartHomeRepository.loadToken(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -53,6 +58,18 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(savedUsername) {
                 if (savedUsername != null) {
                     SmartHomeRepository.loadUserData(savedUsername, strings)
+                    
+                    // Fetch avatar from server
+                    GlobalScope.launch {
+                        val result = SmartHomeRepository.fetchAvatar()
+                        result.onSuccess { response ->
+                            response.avatar?.let { avatarBase64 ->
+                                println("DEBUG: Loaded avatar from server")
+                            }
+                        }.onFailure {
+                            println("DEBUG: Failed to fetch avatar: ${it.message}")
+                        }
+                    }
                 }
             }
 
@@ -98,21 +115,11 @@ fun AppNavigation(
 ) {
     val navController = androidx.navigation.compose.rememberNavController()
 
-    // Tìm user từ Database giả lập
-    val userFromDb = remember(savedUsername) {
-        com.example.android_app.data.MockDatabase.users.find { it.username == savedUsername }
-    }
+    // If savedUsername exists in SharedPreferences, user is considered logged in
+    val initialDestination = if (savedUsername != null) "dashboard" else "login"
 
-    // SỬA LỖI 3: Xử lý trường hợp MockDatabase bị reset khi khởi động lại app
-    var currentUser by remember { mutableStateOf<User?>(userFromDb) }
-
-    // Nếu có username lưu trong máy NHƯNG userFromDb = null (do MockDB bị xóa khi tắt app)
-    // thì phải bắt người dùng quay lại màn hình Login, nếu không Dashboard sẽ bị trắng.
-    val initialDestination = if (savedUsername != null && userFromDb != null) {
-        "dashboard"
-    } else {
-        "login"
-    }
+    // Create User object from saved username (no password needed since we're using token auth)
+    var currentUser by remember { mutableStateOf<User?>(savedUsername?.let { User(0, it) }) }
 
     androidx.navigation.compose.NavHost(
         navController = navController,
@@ -160,6 +167,8 @@ fun AppNavigation(
                     onSettingsClick = { navController.navigate("settings") },
                     onLogout = {
                         sharedPref.edit().remove("saved_username").apply()
+                        SmartHomeRepository.clearToken()
+                        SmartHomeRepository.clearData()
                         currentUser = null
                         navController.navigate("login") { popUpTo(0) }
                     },
@@ -202,6 +211,8 @@ fun AppNavigation(
                     onBack = { navController.popBackStack() },
                     onLogout = {
                         sharedPref.edit().remove("saved_username").apply()
+                        SmartHomeRepository.clearToken()
+                        SmartHomeRepository.clearData()
                         currentUser = null
                         navController.navigate("login") { popUpTo(0) }
                     }

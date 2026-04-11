@@ -23,6 +23,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.example.android_app.data.*
 import com.example.android_app.utils.AppStrings
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +67,17 @@ fun CreatePresetScreen(
                                 roomID = selectedRoom
                             )
                             SmartHomeRepository.savePreset(presetToSave)
+                            
+                            // Save to server
+                            kotlinx.coroutines.GlobalScope.launch {
+                                val result = SmartHomeRepository.savePresetToServer(presetToSave)
+                                result.onSuccess {
+                                    println("DEBUG: Preset saved to server!")
+                                }.onFailure {
+                                    println("DEBUG: Failed to save preset to server: ${it.message}")
+                                }
+                            }
+                            
                             onBack()
                         }
                     }) {

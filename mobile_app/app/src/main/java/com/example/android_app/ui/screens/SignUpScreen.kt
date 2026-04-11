@@ -12,23 +12,29 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.android_app.data.FakeAuthRepository
+import com.example.android_app.data.SmartHomeRepository
 import com.example.android_app.data.User
-import com.example.android_app.utils.AppStrings // Import bộ chữ
+import com.example.android_app.utils.AppStrings
 import com.example.android_app.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SignUpScreen(
-    strings: AppStrings, // THÊM THAM SỐ NÀY
+    strings: AppStrings,
     onSignUpSuccess: (User) -> Unit,
     onBackToLogin: () -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-
-    val authRepo = remember { FakeAuthRepository() }
+    var errorMessage by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Ảnh nền
@@ -42,12 +48,10 @@ fun SignUpScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-//                .background(MaterialTheme.colorScheme.background)
                 .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Dùng strings.signUp
             Text(
                 text = strings.signUp,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -60,7 +64,7 @@ fun SignUpScreen(
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text(strings.fullName) }, // Bạn có thể thêm biến fullName vào AppStrings nếu muốn
+                label = { Text(strings.fullName) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = MaterialTheme.colorScheme.primary,
@@ -76,7 +80,7 @@ fun SignUpScreen(
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it },
-                label = { Text(strings.username) }, // Dùng strings.username
+                label = { Text(strings.username) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = MaterialTheme.colorScheme.primary,
@@ -92,7 +96,7 @@ fun SignUpScreen(
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = { Text(strings.password) }, // Dùng strings.password
+                label = { Text(strings.password) },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -109,23 +113,54 @@ fun SignUpScreen(
 
             Button(
                 onClick = {
-                    if (name.isNotEmpty() && username.isNotEmpty()) {
-                        val newUser = User(name, username, password)
-                        val success = authRepo.register(newUser)
-                        if (success) onSignUpSuccess(newUser)
+                    if (username.isNotEmpty() && password.isNotEmpty()) {
+                        isLoading = true
+                        errorMessage = ""
+
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val result = SmartHomeRepository.register(username, password)
+
+                            withContext(Dispatchers.Main) {
+                                isLoading = false
+                                result.fold(
+                                    onSuccess = { response ->
+                                        // Save token to memory and SharedPrefs
+                                        SmartHomeRepository.setToken(response.token)
+                                        SmartHomeRepository.saveToken(response.token, context)
+                                        onSignUpSuccess(User(response.user_id, response.username))
+                                    },
+                                    onFailure = { exception ->
+                                        errorMessage = exception.message ?: "Registration failed"
+                                    }
+                                )
+                            }
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
+                enabled = !isLoading,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text(strings.signUp) // Dùng strings.signUp
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text(strings.signUp)
+                }
+            }
+
+            if (errorMessage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(errorMessage, color = Color.Red, style = MaterialTheme.typography.bodySmall)
             }
 
             TextButton(onClick = onBackToLogin) {
                 Text(
                     text = strings.loginAsk,
                     color = MaterialTheme.colorScheme.primary
-                ) // Dùng strings.loginAsk
+                )
             }
         }
     }

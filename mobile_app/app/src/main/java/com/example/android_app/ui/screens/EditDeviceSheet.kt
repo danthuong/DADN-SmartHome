@@ -204,14 +204,7 @@ fun EditDeviceSheet(
             Text("${strings.brightness}: ${localBrightness.toInt()}%", modifier = Modifier.align(Alignment.Start))
             Slider(
                 value = localBrightness,
-                onValueChange = {
-                    localBrightness = it
-                    SmartHomeRepository.updateLight(
-                        device.id,
-                        brightness = it,
-                        isOn = it > 0f
-                    )
-                },
+                onValueChange = { localBrightness = it },
                 valueRange = 0f..100f
             )
 
@@ -220,10 +213,7 @@ fun EditDeviceSheet(
 
             RainbowColorPicker(
                 selectedColor = localColor,
-                onColorSelected = { newColor ->
-                    localColor = newColor
-                    SmartHomeRepository.updateLight(device.id, color = newColor.toArgb())
-                }
+                onColorSelected = { newColor -> localColor = newColor }
             )
         }
 
@@ -231,27 +221,46 @@ fun EditDeviceSheet(
             Text("${strings.speed}: ${localSpeed.toInt()}", modifier = Modifier.align(Alignment.Start))
             Slider(
                 value = localSpeed,
-                onValueChange = {
-                    localSpeed = it
-                    SmartHomeRepository.updateFan(device.id, speed = it)
-                },
+                onValueChange = { localSpeed = it },
                 valueRange = 1f..3f,
                 steps = 1
             )
 
             Spacer(modifier = Modifier.height(16.dp))
-            ToggleSettingRow(strings.osc, localOscillating) {
-                localOscillating = it
-                SmartHomeRepository.updateFan(device.id, isOscillating = it)
-            }
-            ToggleSettingRow(strings.track, localTracking) {
-                localTracking = it
-                SmartHomeRepository.updateFan(device.id, isTracking = it)
-            }
+            ToggleSettingRow(strings.osc, localOscillating) { localOscillating = it }
+            ToggleSettingRow(strings.track, localTracking) { localTracking = it }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
-        Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+        Button(
+            onClick = {
+                // Lưu cục bộ trước
+                if (device is SmartLight) {
+                    SmartHomeRepository.updateLight(
+                        device.id,
+                        brightness = localBrightness,
+                        color = localColor.toArgb()
+                    )
+                    SmartHomeRepository.syncLightToServer(device.id, brightness = localBrightness, color = localColor.toArgb())
+                }
+                if (device is SmartFan) {
+                    SmartHomeRepository.updateFan(
+                        device.id,
+                        speed = localSpeed,
+                        isOscillating = localOscillating,
+                        isTracking = localTracking
+                    )
+                    SmartHomeRepository.syncFanToServer(
+                        device.id,
+                        speed = localSpeed,
+                        isOscillating = localOscillating,
+                        isTracking = localTracking
+                    )
+                }
+                onDismiss()
+            },
+            modifier = Modifier.fillMaxWidth().height(56.dp)
+        ) {
             Text(strings.save)
         }
     }
