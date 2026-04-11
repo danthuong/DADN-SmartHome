@@ -18,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.android_app.data.SmartHomeRepository
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -38,26 +41,57 @@ import com.example.android_app.utils.sendNotification
 fun ProfileScreen(user: User, strings: AppStrings, onBack: () -> Unit, onLogout: () -> Unit) {
     val context = LocalContext.current
     val sharedPref = remember { context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE) }
-    var imageUri by remember {
-        mutableStateOf(sharedPref.getString("avatar_uri", null)?.let { Uri.parse(it) })
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    val avatarBase64 by SmartHomeRepository.avatarBase64.collectAsState()
+    val avatarBytes = remember(avatarBase64) {
+        avatarBase64?.let { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }
     }
     // Launcher: Chọn từ Album
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             imageUri = it
-            sharedPref.edit().putString("avatar_uri", it.toString()).apply()
+
+            
+            // Upload avatar to server
+            try {
+                val inputStream = context.contentResolver.openInputStream(it)
+                val bytes = inputStream?.readBytes()
+                inputStream?.close()
+                if (bytes != null) {
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    GlobalScope.launch {
+                        SmartHomeRepository.uploadAvatar(base64)
+                    }
+                }
+            } catch (e: Exception) {
+                println("DEBUG: Failed to upload avatar: ${e.message}")
+            }
         }
-    }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        imageUri = uri
     }
 
     // Launcher: Chụp bằng Camera
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
         bitmap?.let {
             val uri = ImageUtils.saveBitmapToInternalStorage(context, it)
-            imageUri = uri
-            sharedPref.edit().putString("avatar_uri", uri.toString()).apply()
+            uri?.let { validUri ->
+                imageUri = validUri
+
+                
+                // Upload avatar to server
+                try {
+                    val inputStream = context.contentResolver.openInputStream(validUri)
+                    val bytes = inputStream?.readBytes()
+                    inputStream?.close()
+                    if (bytes != null) {
+                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        GlobalScope.launch {
+                            SmartHomeRepository.uploadAvatar(base64)
+                        }
+                    }
+                } catch (e: Exception) {
+                    println("DEBUG: Failed to upload avatar: ${e.message}")
+                }
+            }
         }
     }
 
@@ -84,6 +118,16 @@ fun ProfileScreen(user: User, strings: AppStrings, onBack: () -> Unit, onLogout:
             if (imageUri != null) {
                 AsyncImage(
                     model = imageUri,
+                    contentDescription = strings.ava,
+                    modifier = Modifier
+                        .size(140.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentScale = ContentScale.Crop
+                )
+            } else if (avatarBytes != null) {
+                AsyncImage(
+                    model = avatarBytes,
                     contentDescription = strings.ava,
                     modifier = Modifier
                         .size(140.dp)

@@ -1,8 +1,9 @@
 package com.example.android_app.data
 
 data class User(
-    val fullName: String,
+    val id: Int,
     val username: String,
-    val password: String,
-    val avatarUri: String? = null // Lưu đường dẫn ảnh avatar
+    val fullName: String = "",
+    val password: String = "",
+    val avatarUri: String? = null
 )

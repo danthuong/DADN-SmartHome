@@ -11,6 +11,15 @@ pydantic
 
 mediapipe
 ultralytics
+# torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+python-dotenv
+requests
+Adafruit_IO
+fastapi
+uvicorn
+python-multipart
+pyjwt
+werkzeug
 
 python-dotenv
 requests

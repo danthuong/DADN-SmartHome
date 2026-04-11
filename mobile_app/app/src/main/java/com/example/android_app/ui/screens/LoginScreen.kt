@@ -1,7 +1,6 @@
 package com.example.android_app.ui.screens
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,23 +11,28 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.android_app.data.FakeAuthRepository
+import com.example.android_app.data.SmartHomeRepository
 import com.example.android_app.data.User
-import com.example.android_app.utils.AppStrings // Import bộ chữ
+import com.example.android_app.utils.AppStrings
 import com.example.android_app.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LoginScreen(
-    strings: AppStrings, // THÊM THAM SỐ NÀY
+    strings: AppStrings,
     onLoginSuccess: (User) -> Unit,
     onNavigateToSignUp: () -> Unit
 ) {
+    val context = LocalContext.current
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
-
-    val authRepo = remember { FakeAuthRepository() }
+    var isLoading by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
 
@@ -94,25 +98,50 @@ fun LoginScreen(
 
             Button(
                 onClick = {
-                    val user = authRepo.login(username, password)
-                    if (user != null) {
-                        onLoginSuccess(user)
-                    } else {
-                        // Bạn có thể thêm câu này vào AppStrings nếu muốn dịch luôn lỗi
-                        errorMessage = strings.errorPass
+                    isLoading = true
+                    errorMessage = ""
+                    
+                    // Gọi API login
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val result = SmartHomeRepository.login(username, password)
+                        
+                        withContext(Dispatchers.Main) {
+                            isLoading = false
+                            result.fold(
+                                onSuccess = { response ->
+                                    // Save token to memory and SharedPrefs
+                                    SmartHomeRepository.setToken(response.token)
+                                    SmartHomeRepository.saveToken(response.token, context)
+                                    // Login thành công - chuyển sang Dashboard
+                                    onLoginSuccess(User(response.user_id, response.username))
+                                },
+                                onFailure = { exception ->
+                                    // Login thất bại - hiển thị lỗi
+                                    errorMessage = exception.message ?: "Login failed"
+                                }
+                            )
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
+                enabled = !isLoading,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text(text = strings.login, fontWeight = FontWeight.Bold) // Dùng strings.login
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text(text = strings.login, fontWeight = FontWeight.Bold)
+                }
             }
 
             TextButton(onClick = onNavigateToSignUp) {
                 Text(
                     text = strings.signUpAsk,
                     color = MaterialTheme.colorScheme.primary
-                ) // Dùng strings.signUpAsk
+                )
             }
 
             if (errorMessage.isNotEmpty()) {

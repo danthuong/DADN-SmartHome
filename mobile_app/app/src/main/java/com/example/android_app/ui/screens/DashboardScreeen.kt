@@ -28,6 +28,8 @@ import coil.compose.AsyncImage
 import com.example.android_app.data.*
 import com.example.android_app.ui.theme.PrimaryPurple
 import com.example.android_app.utils.AppStrings
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import java.util.Calendar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -36,7 +38,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.toArgb
 import com.example.android_app.utils.getTranslatedEmojiCategories
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +57,10 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     val sharedPref = remember { context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE) }
-    val savedAvatarUri = sharedPref.getString("avatar_uri", null)?.let { Uri.parse(it) }
+    val avatarBase64 by SmartHomeRepository.avatarBase64.collectAsState()
+    val avatarBytes = remember(avatarBase64) {
+        avatarBase64?.let { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }
+    }
 
     // --- 1. LẤY DATA TỪ REPO (PHÒNG, THIẾT BỊ, PRESETS) ---
     val rooms by SmartHomeRepository.rooms.collectAsState() // Lấy từ Repo để thêm/xóa được
@@ -70,6 +77,60 @@ fun DashboardScreen(
     // --- 2. QUẢN LÝ TRẠNG THÁI UI ---
     // Khởi tạo phòng mặc định sau khi data load
     LaunchedEffect(rooms) { if (selectedRoomID == "" && rooms.isNotEmpty()) selectedRoomID = rooms[0] }
+
+    // Load devices from API when screen opens
+    LaunchedEffect(Unit) {
+        // Check if token is available, if not, try to load it
+        if (SmartHomeRepository.getToken() == null) {
+            SmartHomeRepository.loadToken(context)
+        }
+        
+        // Fetch devices from API
+        val result = SmartHomeRepository.fetchDevices()
+        result.onSuccess { deviceList ->
+            val convertedDevices = deviceList.map { deviceData ->
+                when (deviceData.type) {
+                    "light" -> SmartLight(
+                        id = deviceData.id,
+                        name = deviceData.name,
+                        isOn = deviceData.isOn,
+                        brightness = deviceData.brightness.toFloat(),
+                        color = Color.Yellow.toArgb(),
+                        roomID = deviceData.roomId
+                    )
+                    "fan" -> SmartFan(
+                        id = deviceData.id,
+                        name = deviceData.name,
+                        isOn = deviceData.isOn,
+                        speed = deviceData.speed.toFloat(),
+                        isOscillating = deviceData.isOscillating,
+                        isTracking = deviceData.isTracking,
+                        roomID = deviceData.roomId
+                    )
+                    else -> SmartLight(deviceData.id, deviceData.name, false, 50f, Color.White.toArgb(), deviceData.roomId)
+                }
+            }
+            SmartHomeRepository.setDevicesFromApi(convertedDevices)
+        }.onFailure { error ->
+            println("Error fetching devices: ${error.message}")
+        }
+        
+        // Fetch rooms from API
+        val roomsResult = SmartHomeRepository.fetchRooms()
+        roomsResult.onSuccess { roomList ->
+            println("DEBUG: Fetched ${roomList.size} rooms from API")
+        }.onFailure { error ->
+            println("Error fetching rooms: ${error.message}")
+        }
+        
+        // Fetch presets from API
+        val presetsResult = SmartHomeRepository.fetchPresets()
+        presetsResult.onSuccess { presetList ->
+            println("DEBUG: Fetched ${presetList.presets.size} presets from API")
+        }.onFailure { error ->
+            println("Error fetching presets: ${error.message}")
+        }
+    }
 
     var selectedDeviceForEdit by remember { mutableStateOf<SmartDevice?>(null) }
     var selectedPresetToEdit by remember { mutableStateOf<Preset?>(null) }
@@ -94,8 +155,8 @@ fun DashboardScreen(
                 title = { Text("YOLO HOME", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
                     IconButton(onClick = onProfileClick) {
-                        if (savedAvatarUri != null) {
-                            AsyncImage(model = savedAvatarUri, contentDescription = null, modifier = Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        if (avatarBytes != null) {
+                            AsyncImage(model = avatarBytes, contentDescription = null, modifier = Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                         } else {
                             Surface(Modifier.size(32.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) {
                                 Icon(Icons.Default.Person, null, Modifier.padding(6.dp), tint = MaterialTheme.colorScheme.primary)
@@ -253,14 +314,38 @@ fun DashboardScreen(
             }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f).padding(vertical = 8.dp)) {
                 items(filteredDevices, key = { it.id }) { device ->
+                    var showDeleteDialog by remember { mutableStateOf(false) }
+                    
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = {
                             if (it == SwipeToDismissBoxValue.EndToStart) {
-                                SmartHomeRepository.deleteDevice(device.id)
-                                true
-                            } else false
+                                showDeleteDialog = true
+                            }
+                            false // Don't delete yet, wait for dialog confirmation
                         }
                     )
+
+                    // Delete Confirmation Dialog
+                    if (showDeleteDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showDeleteDialog = false },
+                            title = { Text("Xóa thiết bị") },
+                            text = { Text("Bạn có chắc muốn xóa ${device.name}?") },
+                            confirmButton = {
+                                Button(onClick = {
+                                    // Delete locally first (sync), then call API (async)
+                                    SmartHomeRepository.deleteDevice(device.id)
+                                    GlobalScope.launch {
+                                        SmartHomeRepository.deleteDeviceSync(device.id)
+                                    }
+                                    showDeleteDialog = false
+                                }) { Text("Xóa") }
+                            },
+                            dismissButton = {
+                                Button(onClick = { showDeleteDialog = false }) { Text("Hủy") }
+                            }
+                        )
+                    }
 
                     SwipeToDismissBox(
                         state = dismissState,
@@ -275,7 +360,7 @@ fun DashboardScreen(
                         DeviceItemCard(
                             device = device,
                             strings = strings,
-                            onClick = { selectedDeviceForEdit = device } // 5. CLICK ĐỂ MỞ EDIT SHEET
+                            onClick = { selectedDeviceForEdit = device }
                         )
                     }
                 }
@@ -384,6 +469,11 @@ fun DashboardScreen(
                 // NÚT LƯU
                 Button(
                     onClick = {
+                        println("DEBUG: Saving preset - name: $newPresetName, icon: $selectedIcon, configs: ${selectedConfigs.size}")
+                        selectedConfigs.forEach { (id, config) ->
+                            println("DEBUG: Device $id config: $config")
+                        }
+                        
                         if (newPresetName.isNotEmpty() && selectedConfigs.isNotEmpty()) {
                             val newPreset = Preset(
                                 name = newPresetName,
@@ -391,11 +481,21 @@ fun DashboardScreen(
                                 deviceConfigs = selectedConfigs.toMap(),
                                 roomID = selectedRoomID
                             )
-                            // 1. Gửi dữ liệu xuống Repository để lưu vào List
-                            SmartHomeRepository.savePreset(newPreset)
-                            // 2. Đóng Pop-up
+                            // 1. Save to server (which will update local repo on success)
+                            GlobalScope.launch {
+                                val result = SmartHomeRepository.savePresetToServer(newPreset)
+                                result.onSuccess {
+                                    println("DEBUG: Preset saved to server!")
+                                }.onFailure {
+                                    println("DEBUG: Failed to save preset to server: ${it.message}")
+                                }
+                            }
+                            println("DEBUG: Preset saved successfully!")
+                            // 3. Đóng Pop-up
                             showCreatePresetSheet = false
 
+                        } else {
+                            println("DEBUG: Cannot save preset - name empty: ${newPresetName.isEmpty()}, configs empty: ${selectedConfigs.isEmpty()}")
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp).padding(vertical = 8.dp)
@@ -432,16 +532,14 @@ fun DashboardScreen(
             text = { Text("${strings.addDeviceAsk} ${selectedRoomID}?") },
             confirmButton = {
                 Button(onClick = {
-                    val newDevice = SmartHomeRepository.addDevice(selectedRoomID, DeviceType.LIGHT, strings)
+                    SmartHomeRepository.addDeviceSync(selectedRoomID, DeviceType.LIGHT, strings) { }
                     showAddDeviceDialog = false
-                    selectedDeviceForEdit = newDevice
                 }) { Text(strings.addLight) }
             },
             dismissButton = {
                 Button(onClick = {
-                    val newDevice = SmartHomeRepository.addDevice(selectedRoomID, DeviceType.FAN, strings)
+                    SmartHomeRepository.addDeviceSync(selectedRoomID, DeviceType.FAN, strings) { }
                     showAddDeviceDialog = false
-                    selectedDeviceForEdit = newDevice
                 }) { Text(strings.addFan) }
             }
         )
@@ -626,8 +724,14 @@ fun DeviceItemCard(
             Switch(
                 checked = device.isOn,
                 onCheckedChange = { isChecked ->
-                    if (device is SmartLight) SmartHomeRepository.updateLight(device.id, isOn = isChecked)
-                    if (device is SmartFan) SmartHomeRepository.updateFan(device.id, isOn = isChecked)
+                    if (device is SmartLight) {
+                        SmartHomeRepository.updateLight(device.id, isOn = isChecked)
+                        SmartHomeRepository.syncLightToServer(device.id, isOn = isChecked)
+                    }
+                    if (device is SmartFan) {
+                        SmartHomeRepository.updateFan(device.id, isOn = isChecked)
+                        SmartHomeRepository.syncFanToServer(device.id, isOn = isChecked)
+                    }
                 },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
