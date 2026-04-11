@@ -39,7 +39,7 @@ model = XGBClassifier(
     learning_rate=0.1,
     objective='multi:softprob', 
     random_state=42,
-    # tree_method='gpu_hist' # Bỏ comment nếu máy có card NVIDIA và đã cài đặt hỗ trợ
+    tree_method='gpu_hist' # Bỏ comment nếu máy có card NVIDIA và đã cài đặt hỗ trợ
 )
 
 # Bây giờ y_train chính là các nhãn đã được mã hóa số
