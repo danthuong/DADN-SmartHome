@@ -1,6 +1,15 @@
-mediapipe
+insightface
+onnxruntime
 opencv-python
 numpy
+deep-sort-realtime
+
+fastapi
+uvicorn
+python-multipart
+pydantic
+
+mediapipe
 ultralytics
 # torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python-dotenv
@@ -11,3 +20,12 @@ uvicorn
 python-multipart
 pyjwt
 werkzeug
+
+python-dotenv
+requests
+
+# PyTorch CUDA 12.1
+--index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio

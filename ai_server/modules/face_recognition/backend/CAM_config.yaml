@@ -1,0 +1,7 @@
+cam_server_id: server_221b
+
+location: "221B Baker Street, Marylebone, London, UK"
+
+cameras:
+  - room: bedroom
+    url: "http://192.168.137.208:8080/video"
