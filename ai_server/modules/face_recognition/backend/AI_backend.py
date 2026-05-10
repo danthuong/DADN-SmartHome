@@ -2,20 +2,22 @@ import cv2
 import numpy as np
 import torch
 from fastapi import FastAPI, UploadFile, File, Form
-
+from models.face_quality import MediaPipe_Heuristic
 from models.recognition import ModelFactory
 from models.anti_sproof import SilentFaceModel
 
-from database.CameraAccountDb import JSONCameraAccountDb
+from database.CameraAccountDb import SQLiteCameraAccountDb
 from database.FRDb import (
     Info,
-    DbFactory,
+    HybridFaceDB,
 )
 
 from ..config.config import (
     Retina_ArcConfig,
-    JSONDbConfig,
+    HybridConfig,
 )
+import os
+from dotenv import load_dotenv
 
 from collections import defaultdict
 from PIL import Image
@@ -68,23 +70,16 @@ anti_spoof_model = SilentFaceModel(
     anti_spoof_config
 )
 
+face_quality_model = MediaPipe_Heuristic()
+
 # ===============================
 # Load database
 # ===============================
 
-dbConfig = JSONDbConfig(
-    "frdb.json",
-    "images"
-)
+dbConfig = HybridConfig()
+db = HybridFaceDB(dbConfig)
 
-db = DbFactory.create(
-    "jsonDb",
-    dbConfig
-)
-
-camera_account_db = JSONCameraAccountDb(
-    "camera_accounts.json"
-)
+camera_account_db = SQLiteCameraAccountDb()
 
 # ===============================
 # Cache
@@ -386,82 +381,234 @@ def get_cameras(account: str):
 
 from ..utils.utils import detect_face, crop_face, add_face
 import base64
+from fastapi import UploadFile, File, Form
 import uuid
-@app.post("/register/detect")
-async def detect_register_faces(
-    file: UploadFile = File(...)
+import cv2
+
+
+@app.post("/register")
+async def register_faces(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    cam_server_id: str = Form(...)
 ):
+
+    QUALITY_THRESHOLD = 0.5
+
+    # =====================================
+    # READ FRAME
+    # =====================================
 
     frame = await read_frame(file)
 
     if frame is None:
-        return {"faces": []}
+        return {
+            "saved_ids": [],
+            "skipped_faces": [],
+            "message": "invalid_frame"
+        }
+
+    # =====================================
+    # DETECT FACE
+    # =====================================
 
     faces = detect_face(model, frame)
 
     if len(faces) == 0:
-        return {"faces": []}
+        return {
+            "saved_ids": [],
+            "skipped_faces": [],
+            "message": "no_face_detected"
+        }
 
-    cropped_faces = crop_face(frame, faces)
+    # =====================================
+    # CROP FACE
+    # =====================================
 
-    results = []
-
-    for face_img, face in cropped_faces:
-
-        face_id = str(uuid.uuid4())
-
-        temp_faces[face_id] = (face_img, face)
-
-        _, buffer = cv2.imencode(".jpg", face_img)
-
-        face_base64 = base64.b64encode(buffer).decode()
-
-        results.append({
-            "face_id": face_id,
-            "image": face_base64
-        })
-
-    return {
-        "faces": results
-    }
-
-from pydantic import BaseModel
-from typing import Optional, List
-
-class FaceRegister(BaseModel):
-    face_id: str
-    name: str
-    cam_server_id: Optional[str] = None
-
-
-class RegisterRequest(BaseModel):
-    faces: List[FaceRegister]
-
-@app.post("/register/save")
-def register_faces(req: RegisterRequest):
+    cropped_faces = crop_face(
+        frame,
+        faces
+    )
 
     face_list = []
 
-    for f in req.faces:
+    skipped_faces = []
 
-        if f.face_id not in temp_faces:
-            continue
+    # =====================================
+    # LOOP FACES
+    # =====================================
 
-        face_img, face = temp_faces[f.face_id]
+    for idx, (face_img, face) in enumerate(cropped_faces):
 
-        info = Info(
-            name=f.name if f.name else None,
-            cam_server_id=f.cam_server_id if f.cam_server_id else None
+        # =================================
+        # GET BBOX
+        # =================================
+
+        bbox = face.bbox.astype(int)
+
+        # =================================
+        # QUALITY CHECK
+        # =================================
+
+        result = score_face_quality(
+            frame=face_img,
+            bbox=bbox
         )
 
-        face_list.append((face_img, face, info))
+        print("QUALITY RESULT:", result)
+
+        quality = result.get("quality")
+
+        # =================================
+        # SKIP LOW QUALITY
+        # =================================
+
+        if quality is None or quality < QUALITY_THRESHOLD:
+
+            skipped_faces.append({
+                "face_index": idx,
+                "reason": "low_quality",
+                "quality": quality
+            })
+
+            print(f"[SKIP] Low quality: {quality}")
+
+            continue
+
+        # =================================
+        # CREATE INFO
+        # =================================
+
+        info = Info(
+            name=name,
+            cam_server_id=cam_server_id
+        )
+
+        # =================================
+        # ADD VALID FACE
+        # =================================
+
+        face_list.append(
+            (
+                face_img,
+                face,
+                info
+            )
+        )
+
+    # =====================================
+    # NO VALID FACE
+    # =====================================
 
     if len(face_list) == 0:
-        return {"saved_ids": []}
 
-    ids = add_face(db, face_list)
+        return {
+            "saved_ids": [],
+            "skipped_faces": skipped_faces,
+            "message": "all_faces_skipped"
+        }
+
+    # =====================================
+    # SAVE
+    # =====================================
+
+    ids = add_face(
+        db,
+        face_list
+    )
+
     cam_server_cache.clear()
 
+    # =====================================
+    # RESPONSE
+    # =====================================
+
     return {
-        "saved_ids": ids
+        "saved_ids": ids,
+        "skipped_faces": skipped_faces,
+        "message": "success"
     }
+
+
+def score_face_quality(frame, bbox):
+
+    x1, y1, x2, y2 = bbox
+
+    h, w = frame.shape[:2]
+
+    # =========================
+    # ADD MARGIN
+    # =========================
+
+    margin = 0.3
+
+    bw = x2 - x1
+    bh = y2 - y1
+
+    x1 = int(x1 - bw * margin)
+    y1 = int(y1 - bh * margin)
+    x2 = int(x2 + bw * margin)
+    y2 = int(y2 + bh * margin)
+
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(w, x2)
+    y2 = min(h, y2)
+
+    # =========================
+    # CROP FACE
+    # =========================
+
+    face_img = frame[y1:y2, x1:x2]
+
+    if face_img.size == 0:
+        return {
+            "quality": 0.0
+        }
+
+    print("Face size:", face_img.shape)
+
+    # =========================
+    # PREPROCESS
+    # =========================
+
+    face_img = cv2.resize(face_img, (80, 80))
+
+    face_img = cv2.cvtColor(
+        face_img,
+        cv2.COLOR_BGR2RGB
+    )
+
+    frame_rgb = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2RGB
+    )
+
+    pil_face = Image.fromarray(face_img)
+
+    pil_frame = Image.fromarray(frame_rgb)
+
+    # =========================
+    # QUALITY SCORE
+    # =========================
+
+    try:
+
+        quality_score = face_quality_model.face_score(
+            pil_face,
+            pil_frame
+        )
+
+        print("Quality score:", quality_score)
+
+        return {
+            "quality": float(quality_score)
+        }
+
+    except Exception as e:
+
+        print("Quality error:", e)
+
+        return {
+            "quality": 0.0
+        }

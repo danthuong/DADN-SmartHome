@@ -106,6 +106,43 @@ class DatabaseManager:
                 FOREIGN KEY (device_id) REFERENCES devices(device_id)
             )
         """)
+
+        # ======================
+        # SERVER (from Camera module)
+        # ======================
+        self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS servers (
+            cam_server_id TEXT PRIMARY KEY,
+            location TEXT,
+            url TEXT
+        )
+        """)
+
+        # ======================
+        # FACE
+        # ======================
+        self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS faces (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            cam_server_id TEXT,
+            img_path TEXT,
+            FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
+        )
+        """)
+
+        # ======================
+        # USER ↔ SERVER
+        # ======================
+        self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_servers (
+            user_id INTEGER,
+            cam_server_id TEXT,
+            PRIMARY KEY (user_id, cam_server_id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
+        )
+        """)
         self.conn.commit()
 
     def init_master_data(self):
@@ -348,3 +385,242 @@ class DatabaseManager:
             (device_id, status, reason, threshold)
         )
         self.conn.commit()
+
+    def init_camera_module(self):
+        data = [
+            {
+                "account": "account",
+                "pwd": "123456789",
+                "servers": [
+                    {
+                        "cam_server_id": "server_221b",
+                        "location": "221B Baker Street, Marylebone, London, UK",
+                        "url": "http://localhost:9000"
+                    }
+                ]
+            }
+        ]
+
+        for user in data:
+
+            # =========================
+            # 1. CHECK OR CREATE USER
+            # =========================
+            self.cursor.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (user["account"],)
+            )
+            row = self.cursor.fetchone()
+
+            if row:
+                user_id = row[0]
+            else:
+                self.cursor.execute(
+                    "INSERT INTO users (username, password) VALUES (?, ?)",
+                    (user["account"], user["pwd"])
+                )
+                self.conn.commit()
+                user_id = self.cursor.lastrowid
+
+            # =========================
+            # 2. INSERT SERVERS + MAP
+            # =========================
+            for server in user["servers"]:
+
+                cam_server_id = server["cam_server_id"]
+
+                self.cursor.execute("""
+                    INSERT OR IGNORE INTO servers (cam_server_id, location, url)
+                    VALUES (?, ?, ?)
+                """, (
+                    cam_server_id,
+                    server["location"],
+                    server["url"]
+                ))
+
+                self.cursor.execute("""
+                    INSERT OR IGNORE INTO user_servers (user_id, cam_server_id)
+                    VALUES (?, ?)
+                """, (
+                    user_id,
+                    cam_server_id
+                ))
+
+        self.conn.commit()
+        print("[OK] Camera module initialized (self-contained)")
+
+
+if __name__ == "__main__":
+
+    print("=" * 50)
+    print(" SMART HOME DATABASE INITIALIZATION ")
+    print("=" * 50)
+
+    # ============================
+    # CREATE DB MANAGER
+    # ============================
+
+    db = DatabaseManager("smart_home.db")
+
+    print("[OK] DatabaseManager initialized")
+
+    # ============================
+    # RUN MIGRATIONS
+    # ============================
+
+    print("\n[INFO] Running migrations...")
+
+    db.migrate_database()
+
+    db.init_camera_module()
+
+    print("[OK] Migration completed")
+
+    # ============================
+    # CREATE TEST USER
+    # ============================
+
+    print("\n[INFO] Creating test user...")
+
+    result = db.create_user(
+        username="account",
+        password="123456789"
+    )
+
+    if result["success"]:
+        print(f"[OK] User created with ID: {result['user_id']}")
+
+        user_id = result["user_id"]
+
+    else:
+
+        print(f"[INFO] {result['message']}")
+
+        user = db.get_user("account")
+
+        user_id = user["id"]
+
+        print(f"[OK] Existing user ID: {user_id}")
+
+    # ============================
+    # INIT DEFAULT ROOMS
+    # ============================
+
+    print("\n[INFO] Initializing rooms...")
+
+    rooms = db.get_user_rooms(user_id)
+
+    for room in rooms:
+        print(f"   -> {room['id']} : {room['name']}")
+
+    # ============================
+    # ADD SAMPLE DEVICES
+    # ============================
+
+    print("\n[INFO] Adding sample devices...")
+
+    db.add_user_device(
+        user_id=user_id,
+        device_id="LED_001",
+        name="Living Room LED",
+        device_type="light",
+        room_id="LIVING"
+    )
+
+    db.add_user_device(
+        user_id=user_id,
+        device_id="FAN_001",
+        name="Bedroom Fan",
+        device_type="fan",
+        room_id="BED"
+    )
+
+    print("[OK] Sample devices added")
+
+    # ============================
+    # CREATE SAMPLE PRESET
+    # ============================
+
+    print("\n[INFO] Creating sample preset...")
+
+    sample_config = {
+        "LED_001": {
+            "isOn": True,
+            "brightness": 80
+        },
+        "FAN_001": {
+            "isOn": True,
+            "speed": 3
+        }
+    }
+
+    db.add_user_preset(
+        user_id=user_id,
+        preset_id="PRESET_SLEEP",
+        name="Sleep Mode",
+        icon="moon",
+        room_id="BED",
+        device_configs_json=json.dumps(sample_config)
+    )
+
+    print("[OK] Sample preset created")
+
+    # ============================
+    # INSERT SAMPLE LOGS
+    # ============================
+
+    print("\n[INFO] Inserting sample logs...")
+
+    db.log_sensor(
+        sensor_id="TEMP",
+        value=28.5,
+        user_name="account"
+    )
+
+    db.log_sensor(
+        sensor_id="LIGHT",
+        value=300,
+        user_name="account"
+    )
+
+    db.log_device(
+        device_id="LED",
+        status=1,
+        reason="Motion detected",
+        threshold=0.8
+    )
+
+    db.log_device(
+        device_id="FAN",
+        status=1,
+        reason="Temperature high",
+        threshold=30
+    )
+
+    print("[OK] Sample logs inserted")
+
+    # ============================
+    # SHOW DATA
+    # ============================
+
+    print("\n[INFO] Fetching user devices...")
+
+    devices = db.get_user_devices(user_id)
+
+    for device in devices:
+        print(device)
+
+    print("\n[INFO] Fetching presets...")
+
+    presets = db.get_user_presets(user_id)
+
+    for preset in presets:
+        print(preset)
+
+    # ============================
+    # DONE
+    # ============================
+
+    print("\n" + "=" * 50)
+    print(" DATABASE READY SUCCESSFULLY ")
+    print("=" * 50)

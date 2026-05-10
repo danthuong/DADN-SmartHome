@@ -1,4 +1,11 @@
 from abc import ABC, abstractmethod
+import sqlite3
+import os
+
+
+# ==========================================
+# BASE CAMERA ACCOUNT DB
+# ==========================================
 
 class CameraAccountDb(ABC):
 
@@ -6,49 +13,63 @@ class CameraAccountDb(ABC):
     def get_servers(self, account):
         pass
 
-import json
-import os
 
+# ==========================================
+# SQLITE CAMERA ACCOUNT DB
+# ==========================================
 
-class JSONCameraAccountDb(CameraAccountDb):
+class SQLiteCameraAccountDb(CameraAccountDb):
 
-    def __init__(self, db_path="camera_accounts.json"):
+    def __init__(self, db_path="smart_home.db"):
+        self.db_path = os.path.join(
+            "./",
+            db_path
+        )
 
-        base_path = os.path.join("modules", "face_recognition")
-        self.db_path = os.path.join(base_path, db_path)
+        self.conn = sqlite3.connect(
+            self.db_path,
+            check_same_thread=False
+        )
 
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self.cursor = self.conn.cursor()
 
-        if not os.path.exists(self.db_path):
-            with open(self.db_path, "w") as f:
-                json.dump([], f)
-
-    def _load(self):
-        try:
-            with open(self.db_path, "r") as f:
-                return json.load(f)
-        except:
-            return []
+    # ======================================
+    # GET SERVERS BY ACCOUNT
+    # ======================================
 
     def get_servers(self, account):
 
-        data = self._load()
+        query = """
+            SELECT
+                s.cam_server_id,
+                s.location,
+                s.url
+            FROM users u
 
-        for user in data:
-            if user.get("account") == account:
+            INNER JOIN user_servers us
+                ON u.id = us.user_id
 
-                servers = user.get("servers", [])
+            INNER JOIN servers s
+                ON us.cam_server_id = s.cam_server_id
 
-                result = []
+            WHERE u.username = ?
+        """
 
-                for s in servers:
-                    result.append({
-                        "name": s.get("name"),
-                        "cam_server_id": s.get("cam_server_id"),
-                        "location": s.get("location"),
-                        "url": s.get("url")
-                    })
+        self.cursor.execute(
+            query,
+            (account,)
+        )
 
-                return result
+        rows = self.cursor.fetchall()
 
-        return []
+        result = []
+
+        for row in rows:
+
+            result.append({
+                "cam_server_id": row[0],
+                "location": row[1],
+                "url": row[2]
+            })
+
+        return result
