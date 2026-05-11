@@ -2,20 +2,22 @@ import cv2
 import numpy as np
 import torch
 from fastapi import FastAPI, UploadFile, File, Form
-
+from models.face_quality import MediaPipe_Heuristic
 from models.recognition import ModelFactory
 from models.anti_sproof import SilentFaceModel
 
-from database.CameraAccountDb import JSONCameraAccountDb
+from database.CameraAccountDb import SQLiteCameraAccountDb
 from database.FRDb import (
     Info,
-    DbFactory,
+    HybridFaceDB,
 )
 
 from ..config.config import (
     Retina_ArcConfig,
-    JSONDbConfig,
+    HybridConfig,
 )
+import os
+from dotenv import load_dotenv
 
 from collections import defaultdict
 from PIL import Image
@@ -68,23 +70,16 @@ anti_spoof_model = SilentFaceModel(
     anti_spoof_config
 )
 
+face_quality_model = MediaPipe_Heuristic()
+
 # ===============================
 # Load database
 # ===============================
 
-dbConfig = JSONDbConfig(
-    "frdb.json",
-    "images"
-)
+dbConfig = HybridConfig()
+db = HybridFaceDB(dbConfig)
 
-db = DbFactory.create(
-    "jsonDb",
-    dbConfig
-)
-
-camera_account_db = JSONCameraAccountDb(
-    "camera_accounts.json"
-)
+camera_account_db = SQLiteCameraAccountDb()
 
 # ===============================
 # Cache
@@ -386,82 +381,204 @@ def get_cameras(account: str):
 
 from ..utils.utils import detect_face, crop_face, add_face
 import base64
+from fastapi import UploadFile, File, Form
 import uuid
-@app.post("/register/detect")
-async def detect_register_faces(
-    file: UploadFile = File(...)
-):
+import cv2
+# ===============================
+# QUALITY MODEL
+# ===============================
 
-    frame = await read_frame(file)
+def score_face_quality(frame, bbox, save_debug=True, frame_id=None):
 
-    if frame is None:
-        return {"faces": []}
+    x1, y1, x2, y2 = bbox
+    h, w = frame.shape[:2]
 
-    faces = detect_face(model, frame)
+    # =========================
+    # ADD MARGIN (FOR QUALITY ONLY)
+    # =========================
+    margin = 0.3
 
-    if len(faces) == 0:
-        return {"faces": []}
+    bw = x2 - x1
+    bh = y2 - y1
 
-    cropped_faces = crop_face(frame, faces)
+    mx1 = int(x1 - bw * margin)
+    my1 = int(y1 - bh * margin)
+    mx2 = int(x2 + bw * margin)
+    my2 = int(y2 + bh * margin)
 
-    results = []
+    mx1 = max(0, mx1)
+    my1 = max(0, my1)
+    mx2 = min(w, mx2)
+    my2 = min(h, my2)
 
-    for face_img, face in cropped_faces:
+    # =========================
+    # ORIGINAL FACE (NO MARGIN)
+    # =========================
+    face_img = frame[y1:y2, x1:x2]
 
-        face_id = str(uuid.uuid4())
+    if face_img.size == 0:
+        print("[QUALITY] face size = 0")
+        return {
+            "quality": 0.0,
+            "face_img": None
+        }
 
-        temp_faces[face_id] = (face_img, face)
+    # =========================
+    # QUALITY FACE (WITH MARGIN)
+    # =========================
+    quality_face = frame[my1:my2, mx1:mx2]
 
-        _, buffer = cv2.imencode(".jpg", face_img)
+    if quality_face.size == 0:
+        print("[QUALITY] quality face size = 0")
+        return {
+            "quality": 0.0,
+            "face_img": face_img
+        }
 
-        face_base64 = base64.b64encode(buffer).decode()
+    # =========================
+    # PREPROCESS
+    # =========================
+    quality_face = cv2.resize(quality_face, (80, 80))
+    quality_face = cv2.cvtColor(quality_face, cv2.COLOR_BGR2RGB)
 
-        results.append({
-            "face_id": face_id,
-            "image": face_base64
-        })
+    pil_img = Image.fromarray(quality_face)
 
-    return {
-        "faces": results
-    }
-
-from pydantic import BaseModel
-from typing import Optional, List
-
-class FaceRegister(BaseModel):
-    face_id: str
-    name: str
-    cam_server_id: Optional[str] = None
-
-
-class RegisterRequest(BaseModel):
-    faces: List[FaceRegister]
-
-@app.post("/register/save")
-def register_faces(req: RegisterRequest):
-
-    face_list = []
-
-    for f in req.faces:
-
-        if f.face_id not in temp_faces:
-            continue
-
-        face_img, face = temp_faces[f.face_id]
-
-        info = Info(
-            name=f.name if f.name else None,
-            cam_server_id=f.cam_server_id if f.cam_server_id else None
+    # =========================
+    # SCORE
+    # =========================
+    try:
+        quality_score = face_quality_model.face_score(
+            pil_img,
+            pil_img
         )
+        quality_score = float(quality_score)
 
-        face_list.append((face_img, face, info))
+    except Exception as e:
+        print("Quality error:", e)
+        return {
+            "quality": 0.0,
+            "face_img": face_img
+        }
 
-    if len(face_list) == 0:
-        return {"saved_ids": []}
+    # =========================
+    # DEBUG
+    # =========================
+    if save_debug:
+        os.makedirs("./test", exist_ok=True)
 
-    ids = add_face(db, face_list)
-    cam_server_cache.clear()
+        tag = frame_id if frame_id is not None else "na"
+        filename = f"frame_{tag}_score_{quality_score:.3f}.jpg"
+        save_path = os.path.join("./test", filename)
+
+        cv2.imwrite(save_path, face_img)
 
     return {
-        "saved_ids": ids
+        "quality": quality_score,
+        "face_img": face_img
     }
+
+
+# ===============================
+# REGISTER API
+# ===============================
+
+from fastapi import WebSocket
+import cv2
+import numpy as np
+
+@app.websocket("/ws/register")
+async def register_ws(websocket: WebSocket):
+
+    await websocket.accept()
+
+    try:
+        while True:
+
+            data = await websocket.receive_json()
+
+            # =====================
+            # DECODE INPUT
+            # =====================
+            frame_bytes = data["file"]
+            name = data["name"]
+            cam_server_id = data["cam_server_id"]
+
+            np_arr = np.frombuffer(bytearray(frame_bytes), np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                await websocket.send_json({
+                    "message": "invalid_frame"
+                })
+                continue
+
+            QUALITY_THRESHOLD = 0.5
+
+            faces = detect_face(model, frame)
+
+            if len(faces) == 0:
+                await websocket.send_json({
+                    "message": "no_face_detected"
+                })
+                continue
+
+            face_list = []
+
+            h, w = frame.shape[:2]
+
+            for idx, face in enumerate(faces):
+
+                x1, y1, x2, y2 = map(int, face.bbox)
+
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+
+                bbox = (x1, y1, x2, y2)
+
+                result = score_face_quality(
+                    frame=frame,
+                    bbox=bbox,
+                    frame_id=idx,
+                    save_debug=False,
+                )
+
+                quality = result.get("quality", 0.0)
+                face_img = result.get("face_img", None)
+
+                print("QUALITY RESULT:", quality)
+
+                if face_img is not None and quality >= QUALITY_THRESHOLD:
+
+                    info = Info(
+                        name=name,
+                        cam_server_id=cam_server_id
+                    )
+
+                    face_list.append((face_img, face, info))
+
+            # =====================
+            # RULES (GIỮ NGUYÊN 100%)
+            # =====================
+
+            if len(face_list) == 0:
+                await websocket.send_json({
+                    "message": "no_valid_face"
+                })
+                continue
+
+            if len(face_list) > 1:
+                await websocket.send_json({
+                    "message": "more_than_one"
+                })
+                continue
+
+            ids = add_face(db, face_list)
+            cam_server_cache.clear()
+
+            await websocket.send_json({
+                "message": "success",
+            })
+
+    except Exception as e:
+        print("WS ERROR:", e)
+        await websocket.close()
