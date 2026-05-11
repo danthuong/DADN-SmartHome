@@ -482,98 +482,104 @@ def score_face_quality(frame, bbox, save_debug=True, frame_id=None):
 # REGISTER API
 # ===============================
 
-@app.post("/register")
-async def register_faces(
-    file: UploadFile = File(...),
-    name: str = Form(...),
-    cam_server_id: str = Form(...)
-):
+from fastapi import WebSocket
+import cv2
+import numpy as np
 
-    QUALITY_THRESHOLD = 0.5
+@app.websocket("/ws/register")
+async def register_ws(websocket: WebSocket):
 
-    frame = await read_frame(file)
+    await websocket.accept()
 
-    if frame is None:
-        return {
-            "saved_ids": [],
-            "skipped_faces": [],
-            "message": "invalid_frame"
-        }
+    try:
+        while True:
 
-    faces = detect_face(model, frame)
+            data = await websocket.receive_json()
 
-    if len(faces) == 0:
-        return {
-            "saved_ids": [],
-            "skipped_faces": [],
-            "message": "no_face_detected"
-        }
+            # =====================
+            # DECODE INPUT
+            # =====================
+            frame_bytes = data["file"]
+            name = data["name"]
+            cam_server_id = data["cam_server_id"]
 
-    face_list = []
-    skipped_faces = []
+            np_arr = np.frombuffer(bytearray(frame_bytes), np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-    h, w = frame.shape[:2]
+            if frame is None:
+                await websocket.send_json({
+                    "message": "invalid_frame"
+                })
+                continue
 
-    for idx, face in enumerate(faces):
+            QUALITY_THRESHOLD = 0.5
 
-        x1, y1, x2, y2 = map(int, face.bbox)
+            faces = detect_face(model, frame)
 
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w, x2), min(h, y2)
+            if len(faces) == 0:
+                await websocket.send_json({
+                    "message": "no_face_detected"
+                })
+                continue
 
-        bbox = (x1, y1, x2, y2)
+            face_list = []
 
-        # =========================
-        # QUALITY CHECK
-        # =========================
-        result = score_face_quality(
-            frame=frame,
-            bbox=bbox,
-            frame_id=idx
-        )
+            h, w = frame.shape[:2]
 
-        quality = result.get("quality", 0.0)
-        face_img = result.get("face_img", None)
+            for idx, face in enumerate(faces):
 
-        print("QUALITY RESULT:", quality)
+                x1, y1, x2, y2 = map(int, face.bbox)
 
-        if face_img is None or quality < QUALITY_THRESHOLD:
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
 
-            skipped_faces.append({
-                "face_index": idx,
-                "reason": "low_quality",
-                "quality": quality
+                bbox = (x1, y1, x2, y2)
+
+                result = score_face_quality(
+                    frame=frame,
+                    bbox=bbox,
+                    frame_id=idx,
+                    save_debug=False,
+                )
+
+                quality = result.get("quality", 0.0)
+                face_img = result.get("face_img", None)
+
+                print("QUALITY RESULT:", quality)
+
+                if face_img is not None and quality >= QUALITY_THRESHOLD:
+
+                    info = Info(
+                        name=name,
+                        cam_server_id=cam_server_id
+                    )
+
+                    face_list.append((face_img, face, info))
+
+            # =====================
+            # RULES (GIỮ NGUYÊN 100%)
+            # =====================
+
+            if len(face_list) == 0:
+                await websocket.send_json({
+                    "message": "no_valid_face"
+                })
+                continue
+
+            if len(face_list) > 1:
+                await websocket.send_json({
+                    "message": "more_than_one"
+                })
+                continue
+
+            ids = add_face(db, face_list)
+            cam_server_cache.clear()
+
+            await websocket.send_json({
+                "message": "success",
+                "ids": ids
             })
 
-            print(f"[SKIP] Low quality: {quality}")
-            continue
-
-        # =========================
-        # INFO
-        # =========================
-        info = Info(
-            name=name,
-            cam_server_id=cam_server_id
-        )
-
-        # =========================
-        # FIX HERE (IMPORTANT)
-        # =========================
-        face_list.append((face_img, face, info))
-
-    if len(face_list) == 0:
-        return {
-            "saved_ids": [],
-            "skipped_faces": skipped_faces,
-            "message": "all_faces_skipped"
-        }
-
-    ids = add_face(db, face_list)
-
-    cam_server_cache.clear()
-
-    return {
-        "saved_ids": ids,
-        "skipped_faces": skipped_faces,
-        "message": "success"
-    }
+    except Exception as e:
+        print("WS ERROR:", e)
+        await websocket.close()

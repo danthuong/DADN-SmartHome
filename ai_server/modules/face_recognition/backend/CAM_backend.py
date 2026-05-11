@@ -42,8 +42,8 @@ class RegisterRequest(BaseModel):
 # Camera Worker
 # ==============================
 DISPLAY_LOCAL = False   # bật/tắt hiển thị màn hình local
-mqtt = SmartHomeMQTT()
-mqtt.start()
+# mqtt = SmartHomeMQTT()
+# mqtt.start()
 
 
 import threading
