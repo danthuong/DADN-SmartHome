@@ -5,10 +5,35 @@ uvicorn
 PyJWT
 passlib
 bcrypt==3.2.2
+# onnxruntime
+# # insightface 
+# opencv-python
+# numpy
+# deep-sort-realtime
+
+fastapi
+uvicorn
+python-multipart
+pydantic
+
 mediapipe
-opencv-python
-numpy
 ultralytics
-torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python-dotenv
 request
+requests
+Adafruit_IO
+fastapi
+uvicorn
+python-multipart
+pyjwt
+werkzeug
+
+python-dotenv
+requests
+
+# PyTorch CUDA 12.1
+# --index-url https://download.pytorch.org/whl/cu121
+# torch
+# torchvision
+# torchaudio

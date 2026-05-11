@@ -21,6 +21,8 @@ foundationLayout = "1.10.3"
 #firebase-bom = "33.1.2"
 gson = "2.10.1"
 firebaseCrashlyticsBuildtools = "3.0.6"
+retrofit = "2.9.0"
+okhttp = "4.12.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -50,6 +52,8 @@ androidx-compose-foundation-layout = { group = "androidx.compose.foundation", na
 #firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 google-gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
+retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -11,6 +11,7 @@ ai_server/.env
 ###############
 # Virtual environment
 venv/
+.venv
 .env
 .env.*
 !.env.example

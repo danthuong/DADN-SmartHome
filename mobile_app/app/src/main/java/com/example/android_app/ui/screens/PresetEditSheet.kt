@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.android_app.data.*
 import com.example.android_app.utils.AppStrings
+import kotlinx.coroutines.launch
 
 @Composable
 fun PresetEditSheet(
@@ -150,6 +151,17 @@ fun PresetEditSheet(
                     )
                     // Lưu vào Repository
                     SmartHomeRepository.savePreset(updatedPreset)
+                    
+                    // Save to server
+                    kotlinx.coroutines.GlobalScope.launch {
+                        val result = SmartHomeRepository.savePresetToServer(updatedPreset)
+                        result.onSuccess {
+                            println("DEBUG: Preset saved to server!")
+                        }.onFailure {
+                            println("DEBUG: Failed to save preset to server: ${it.message}")
+                        }
+                    }
+                    
                     onDismiss()
                 }
             },
