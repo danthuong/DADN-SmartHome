@@ -1,3 +1,10 @@
+adafruit-io
+pyserial
+fastapi
+uvicorn
+PyJWT
+passlib
+bcrypt==3.2.2
 # onnxruntime
 # # insightface 
 # opencv-python
@@ -13,6 +20,7 @@ mediapipe
 ultralytics
 # torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python-dotenv
+request
 requests
 Adafruit_IO
 fastapi
