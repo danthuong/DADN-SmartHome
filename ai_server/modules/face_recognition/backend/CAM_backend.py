@@ -11,6 +11,7 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 from mqtt_client import SmartHomeMQTT 
 
 AI_URL = "http://localhost:8000/detect"
+CENTRAL_SERVER_URL = "http://localhost:8000"
 
 import os
 app = FastAPI()
@@ -326,6 +327,34 @@ def load_config():
     path = os.path.join(BASE_DIR, "CAM_config.yaml")
     with open(path, "r") as f:
         return yaml.safe_load(f)
+
+def register_server():
+
+    config = load_config()
+
+    cam_server_id = config["cam_server_id"]
+    location = config["location"]
+
+    payload = {
+        "cam_server_id": cam_server_id,
+        "location": location,
+        # URL của camera backend hiện tại
+        "url": "http://localhost:9000"
+    }
+
+    try:
+
+        response = requests.post(
+            f"{CENTRAL_SERVER_URL}/register_server",
+            json=payload,
+            timeout=10
+        )
+
+        print("[REGISTER]", response.json())
+
+    except Exception as e:
+
+        print("[REGISTER ERROR]", e)
     
 def start_cameras():
 
@@ -363,6 +392,7 @@ def start_cameras():
 
 @app.on_event("startup")
 def startup_event():
+    register_server()
     start_cameras()
 
 from fastapi import Request

@@ -582,3 +582,30 @@ async def register_ws(websocket: WebSocket):
     except Exception as e:
         print("WS ERROR:", e)
         await websocket.close()
+
+# ===============================
+# SERVER REGISTER API
+# ===============================
+
+from pydantic import BaseModel
+
+
+class ServerRegisterRequest(BaseModel):
+
+    cam_server_id: str
+    location: str
+    url: str
+
+
+@app.post("/register_server")
+def register_server(
+    request: ServerRegisterRequest
+):
+
+    result = camera_account_db.register_camera_server(
+        cam_server_id=request.cam_server_id,
+        location=request.location,
+        url=request.url
+    )
+
+    return result

@@ -73,3 +73,41 @@ class SQLiteCameraAccountDb(CameraAccountDb):
             })
 
         return result
+    
+        # ==================== REGISTER CAMERA SERVER ====================
+
+    def register_camera_server(
+        self,
+        cam_server_id,
+        location,
+        url
+    ):
+
+        # ====================================
+        # INSERT OR UPDATE SERVER
+        # ====================================
+
+        self.cursor.execute(
+            """
+            INSERT OR REPLACE INTO servers
+            (cam_server_id, location, url)
+            VALUES (?, ?, ?)
+            """,
+            (
+                cam_server_id,
+                location,
+                url
+            )
+        )
+
+        self.conn.commit()
+
+        print(
+            f"[DB] Registered camera server "
+            f"{cam_server_id}"
+        )
+
+        return {
+            "success": True,
+            "cam_server_id": cam_server_id
+        }

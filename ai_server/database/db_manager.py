@@ -69,10 +69,13 @@ class DatabaseManager:
         self.cursor.execute("CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, description TEXT)")
         
         self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS faces (
-                face_id TEXT PRIMARY KEY, camera_id TEXT NOT NULL, name TEXT, embedding_path TEXT,
-                FOREIGN KEY (camera_id) REFERENCES cameras(camera_id) ON DELETE CASCADE
-            )
+        CREATE TABLE IF NOT EXISTS faces (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            cam_server_id TEXT,
+            img_path TEXT,
+            FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
+        )
         """)
         
         self.cursor.execute("""
@@ -122,9 +125,11 @@ class DatabaseManager:
         
         self.cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_servers (
-            user_id INTEGER, cam_server_id TEXT,
+            user_id TEXT,
+            cam_server_id TEXT,
             PRIMARY KEY (user_id, cam_server_id),
-            FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
         )
         """)
         self.conn.commit()
@@ -185,13 +190,45 @@ class DatabaseManager:
             pass
 
     def create_user(self, username, password):
+
         hashed = generate_password_hash(password)
+
         try:
-            self.cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)",(username, hashed))
+            # 1. INSERT USER TRƯỚC
+            self.cursor.execute(
+                "INSERT INTO users (username, password) VALUES (?, ?)",
+                (username, hashed)
+            )
+
+            user_id = self.cursor.lastrowid   # ✅ LẤY ID NGAY SAU INSERT
+
+            # 2. AUTO LINK CAMERA SERVERS
+            self.cursor.execute("SELECT cam_server_id FROM servers")
+            servers = self.cursor.fetchall()
+
+            for (cam_server_id,) in servers:
+                self.cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO user_servers (user_id, cam_server_id)
+                    VALUES (?, ?)
+                    """,
+                    (user_id, cam_server_id)
+                )
+
             self.conn.commit()
-            return {"success": True, "user_id": self.cursor.lastrowid}
+
+            print(f"[OK] Auto linked {len(servers)} camera servers to user {username}")
+
+            return {
+                "success": True,
+                "user_id": user_id
+            }
+
         except sqlite3.IntegrityError:
-            return {"success": False, "message": "Username already exists"}
+            return {
+                "success": False,
+                "message": "Username already exists"
+            }
 
     def get_user(self, username):
         self.cursor.execute("SELECT id, username, password, avatar FROM users WHERE username = ?", (username,))
@@ -308,25 +345,179 @@ class DatabaseManager:
         self.conn.commit()
         return self.cursor.rowcount > 0
 
-    def init_camera_module(self):
-        data = [{
-            "account": "account", "pwd": "123456789",
-            "servers": [{"cam_server_id": "server_221b", "location": "221B Baker Street", "url": "http://localhost:9000"}]
-        }]
-        for user in data:
-            self.cursor.execute("SELECT id FROM users WHERE username = ?", (user["account"],))
-            row = self.cursor.fetchone()
-            if row:
-                user_id = row[0]
-            else:
-                self.cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (user["account"], user["pwd"]))
-                self.conn.commit()
-                user_id = self.cursor.lastrowid
 
-            for server in user["servers"]:
-                cam_server_id = server["cam_server_id"]
-                self.cursor.execute("INSERT OR IGNORE INTO servers (cam_server_id, location, url) VALUES (?, ?, ?)",
-                                    (cam_server_id, server["location"], server["url"]))
-                self.cursor.execute("INSERT OR IGNORE INTO user_servers (user_id, cam_server_id) VALUES (?, ?)",
-                                    (user_id, cam_server_id))
-        self.conn.commit()
+if __name__ == "__main__":
+
+    # print("=" * 50)
+    # print(" SMART HOME DATABASE INITIALIZATION ")
+    # print("=" * 50)
+
+    # # ============================
+    # # CREATE DB MANAGER
+    # # ============================
+
+    db = DatabaseManager("smart_home.db")
+
+    # print("[OK] DatabaseManager initialized")
+
+    # # ============================
+    # # RUN MIGRATIONS
+    # # ============================
+
+    # print("\n[INFO] Running migrations...")
+
+    # db.migrate_database()
+    # print("[OK] Migration completed")
+
+    # # ============================
+    # # CREATE TEST USER
+    # # ============================
+
+    # print("\n[INFO] Creating test user...")
+
+    # result = db.create_user(
+    #     username="account1",
+    #     password="123456789"
+    # )
+
+    # if result["success"]:
+    #     print(f"[OK] User created with ID: {result['user_id']}")
+
+    #     user_id = result["user_id"]
+
+    # else:
+
+    #     print(f"[INFO] {result['message']}")
+
+    #     user = db.get_user("account1")
+
+    #     user_id = user["id"]
+
+    #     print(f"[OK] Existing user ID: {user_id}")
+
+    # # ============================
+    # # INIT DEFAULT ROOMS
+    # # ============================
+
+    # print("\n[INFO] Initializing rooms...")
+
+    # rooms = db.get_user_rooms(user_id)
+
+    # for room in rooms:
+    #     print(f"   -> {room['id']} : {room['name']}")
+
+    # # ============================
+    # # ADD SAMPLE DEVICES
+    # # ============================
+
+    # print("\n[INFO] Adding sample devices...")
+
+    # db.add_user_device(
+    #     user_id=user_id,
+    #     device_id="LED_001",
+    #     name="Living Room LED",
+    #     device_type="light",
+    #     room_id="LIVING"
+    # )
+
+    # db.add_user_device(
+    #     user_id=user_id,
+    #     device_id="FAN_001",
+    #     name="Bedroom Fan",
+    #     device_type="fan",
+    #     room_id="BED"
+    # )
+
+    # print("[OK] Sample devices added")
+
+    # # ============================
+    # # CREATE SAMPLE PRESET
+    # # ============================
+
+    # print("\n[INFO] Creating sample preset...")
+
+    # sample_config = {
+    #     "LED_001": {
+    #         "isOn": True,
+    #         "brightness": 80
+    #     },
+    #     "FAN_001": {
+    #         "isOn": True,
+    #         "speed": 3
+    #     }
+    # }
+
+    # db.add_user_preset(
+    #     user_id=user_id,
+    #     preset_id="PRESET_SLEEP",
+    #     name="Sleep Mode",
+    #     icon="moon",
+    #     room_id="BED",
+    #     device_configs_json=json.dumps(sample_config)
+    # )
+
+    # print("[OK] Sample preset created")
+
+    # # ============================
+    # # INSERT SAMPLE LOGS
+    # # ============================
+
+    # print("\n[INFO] Inserting sample logs...")
+
+    # db.log_sensor(
+    #     sensor_id="TEMP",
+    #     value=28.5,
+    #     user_name="account"
+    # )
+
+    # db.log_sensor(
+    #     sensor_id="LIGHT",
+    #     value=300,
+    #     user_name="account"
+    # )
+
+    # db.log_device(
+    #     device_id="LED",
+    #     status=1,
+    #     trigger_source="Motion detected",
+    #     threshold=0.8
+    # )
+
+    # db.log_device(
+    #     device_id="FAN",
+    #     status=1,
+    #     trigger_source="Temperature high",
+    #     threshold=30
+    # )
+
+    # print("[OK] Sample logs inserted")
+
+    # # ============================
+    # # SHOW DATA
+    # # ============================
+
+    # print("\n[INFO] Fetching user devices...")
+
+    # devices = db.get_user_devices(user_id)
+
+    # for device in devices:
+    #     print(device)
+
+    # print("\n[INFO] Fetching presets...")
+
+    # presets = db.get_user_presets(user_id)
+
+    # for preset in presets:
+    #     print(preset)
+
+    # # ============================
+    # # DONE
+    # # ============================
+
+    # print("\n" + "=" * 50)
+    # print(" DATABASE READY SUCCESSFULLY ")
+    # print("=" * 50)
+    result = db.create_user(
+        username="account",
+        password="123456789"
+    )
