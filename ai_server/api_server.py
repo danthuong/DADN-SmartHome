@@ -5,7 +5,9 @@ import jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
 # ==========================================
 # 1. CẤU HÌNH SMART MQTT (Giao thức lõi)
 # ==========================================
@@ -20,8 +22,8 @@ mqtt.start()
 # 2. CẤU HÌNH BẢO MẬT & JWT TOKEN
 # ==========================================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = "khoa_bi_mat_cua_nhom_iot" 
-ALGORITHM = "HS256"
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("HS256")
 
 # ==========================================
 # 3. KHỞI TẠO FASTAPI SERVER
