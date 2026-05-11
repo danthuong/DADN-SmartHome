@@ -1,9 +1,11 @@
 import sys
 from Adafruit_IO import MQTTClient
-
-# Cấu hình khóa truy cập đến ADAFRUIT
+# from dotenv import load_dotenv
+# load_env()
+# Cấu hình khóa truy cập đến ADAFRUIT- sau nayf se bo vao .env
 AIO_USERNAME = "thinhphan2313306"
-AIO_KEY = "aio_VWuR71QDMpqjdnUvo65mq4sZKtmI"
+AIO_KEY = "aio_AUvg17BXBh07fGibCaVN5aRGSvzK"
+# AIO_USERNAME = dot
 
 class SmartHomeMQTT:
     def __init__(self):
