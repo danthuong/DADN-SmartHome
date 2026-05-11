@@ -577,7 +577,6 @@ async def register_ws(websocket: WebSocket):
 
             await websocket.send_json({
                 "message": "success",
-                "ids": ids
             })
 
     except Exception as e:

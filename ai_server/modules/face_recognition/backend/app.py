@@ -197,7 +197,7 @@ def register_face():
 
                 messagebox.showinfo(
                     "Success",
-                    f"IDs: {result.get('ids', [])}"
+                    "Register face successful"
                 )
                 break
 
