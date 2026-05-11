@@ -384,7 +384,103 @@ import base64
 from fastapi import UploadFile, File, Form
 import uuid
 import cv2
+# ===============================
+# QUALITY MODEL
+# ===============================
 
+def score_face_quality(frame, bbox, save_debug=True, frame_id=None):
+
+    x1, y1, x2, y2 = bbox
+    h, w = frame.shape[:2]
+
+    # =========================
+    # ADD MARGIN (FOR QUALITY ONLY)
+    # =========================
+    margin = 0.3
+
+    bw = x2 - x1
+    bh = y2 - y1
+
+    mx1 = int(x1 - bw * margin)
+    my1 = int(y1 - bh * margin)
+    mx2 = int(x2 + bw * margin)
+    my2 = int(y2 + bh * margin)
+
+    mx1 = max(0, mx1)
+    my1 = max(0, my1)
+    mx2 = min(w, mx2)
+    my2 = min(h, my2)
+
+    # =========================
+    # ORIGINAL FACE (NO MARGIN)
+    # =========================
+    face_img = frame[y1:y2, x1:x2]
+
+    if face_img.size == 0:
+        print("[QUALITY] face size = 0")
+        return {
+            "quality": 0.0,
+            "face_img": None
+        }
+
+    # =========================
+    # QUALITY FACE (WITH MARGIN)
+    # =========================
+    quality_face = frame[my1:my2, mx1:mx2]
+
+    if quality_face.size == 0:
+        print("[QUALITY] quality face size = 0")
+        return {
+            "quality": 0.0,
+            "face_img": face_img
+        }
+
+    # =========================
+    # PREPROCESS
+    # =========================
+    quality_face = cv2.resize(quality_face, (80, 80))
+    quality_face = cv2.cvtColor(quality_face, cv2.COLOR_BGR2RGB)
+
+    pil_img = Image.fromarray(quality_face)
+
+    # =========================
+    # SCORE
+    # =========================
+    try:
+        quality_score = face_quality_model.face_score(
+            pil_img,
+            pil_img
+        )
+        quality_score = float(quality_score)
+
+    except Exception as e:
+        print("Quality error:", e)
+        return {
+            "quality": 0.0,
+            "face_img": face_img
+        }
+
+    # =========================
+    # DEBUG
+    # =========================
+    if save_debug:
+        os.makedirs("./test", exist_ok=True)
+
+        tag = frame_id if frame_id is not None else "na"
+        filename = f"frame_{tag}_score_{quality_score:.3f}.jpg"
+        save_path = os.path.join("./test", filename)
+
+        cv2.imwrite(save_path, face_img)
+
+    return {
+        "quality": quality_score,
+        "face_img": face_img
+    }
+
+
+# ===============================
+# REGISTER API
+# ===============================
 
 @app.post("/register")
 async def register_faces(
@@ -395,10 +491,6 @@ async def register_faces(
 
     QUALITY_THRESHOLD = 0.5
 
-    # =====================================
-    # READ FRAME
-    # =====================================
-
     frame = await read_frame(file)
 
     if frame is None:
@@ -407,10 +499,6 @@ async def register_faces(
             "skipped_faces": [],
             "message": "invalid_frame"
         }
-
-    # =====================================
-    # DETECT FACE
-    # =====================================
 
     faces = detect_face(model, frame)
 
@@ -421,49 +509,35 @@ async def register_faces(
             "message": "no_face_detected"
         }
 
-    # =====================================
-    # CROP FACE
-    # =====================================
-
-    cropped_faces = crop_face(
-        frame,
-        faces
-    )
-
     face_list = []
-
     skipped_faces = []
 
-    # =====================================
-    # LOOP FACES
-    # =====================================
+    h, w = frame.shape[:2]
 
-    for idx, (face_img, face) in enumerate(cropped_faces):
+    for idx, face in enumerate(faces):
 
-        # =================================
-        # GET BBOX
-        # =================================
+        x1, y1, x2, y2 = map(int, face.bbox)
 
-        bbox = face.bbox.astype(int)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
 
-        # =================================
+        bbox = (x1, y1, x2, y2)
+
+        # =========================
         # QUALITY CHECK
-        # =================================
-
+        # =========================
         result = score_face_quality(
-            frame=face_img,
-            bbox=bbox
+            frame=frame,
+            bbox=bbox,
+            frame_id=idx
         )
 
-        print("QUALITY RESULT:", result)
+        quality = result.get("quality", 0.0)
+        face_img = result.get("face_img", None)
 
-        quality = result.get("quality")
+        print("QUALITY RESULT:", quality)
 
-        # =================================
-        # SKIP LOW QUALITY
-        # =================================
-
-        if quality is None or quality < QUALITY_THRESHOLD:
+        if face_img is None or quality < QUALITY_THRESHOLD:
 
             skipped_faces.append({
                 "face_index": idx,
@@ -472,143 +546,34 @@ async def register_faces(
             })
 
             print(f"[SKIP] Low quality: {quality}")
-
             continue
 
-        # =================================
-        # CREATE INFO
-        # =================================
-
+        # =========================
+        # INFO
+        # =========================
         info = Info(
             name=name,
             cam_server_id=cam_server_id
         )
 
-        # =================================
-        # ADD VALID FACE
-        # =================================
-
-        face_list.append(
-            (
-                face_img,
-                face,
-                info
-            )
-        )
-
-    # =====================================
-    # NO VALID FACE
-    # =====================================
+        # =========================
+        # FIX HERE (IMPORTANT)
+        # =========================
+        face_list.append((face_img, face, info))
 
     if len(face_list) == 0:
-
         return {
             "saved_ids": [],
             "skipped_faces": skipped_faces,
             "message": "all_faces_skipped"
         }
 
-    # =====================================
-    # SAVE
-    # =====================================
-
-    ids = add_face(
-        db,
-        face_list
-    )
+    ids = add_face(db, face_list)
 
     cam_server_cache.clear()
-
-    # =====================================
-    # RESPONSE
-    # =====================================
 
     return {
         "saved_ids": ids,
         "skipped_faces": skipped_faces,
         "message": "success"
     }
-
-
-def score_face_quality(frame, bbox):
-
-    x1, y1, x2, y2 = bbox
-
-    h, w = frame.shape[:2]
-
-    # =========================
-    # ADD MARGIN
-    # =========================
-
-    margin = 0.3
-
-    bw = x2 - x1
-    bh = y2 - y1
-
-    x1 = int(x1 - bw * margin)
-    y1 = int(y1 - bh * margin)
-    x2 = int(x2 + bw * margin)
-    y2 = int(y2 + bh * margin)
-
-    x1 = max(0, x1)
-    y1 = max(0, y1)
-    x2 = min(w, x2)
-    y2 = min(h, y2)
-
-    # =========================
-    # CROP FACE
-    # =========================
-
-    face_img = frame[y1:y2, x1:x2]
-
-    if face_img.size == 0:
-        return {
-            "quality": 0.0
-        }
-
-    print("Face size:", face_img.shape)
-
-    # =========================
-    # PREPROCESS
-    # =========================
-
-    face_img = cv2.resize(face_img, (80, 80))
-
-    face_img = cv2.cvtColor(
-        face_img,
-        cv2.COLOR_BGR2RGB
-    )
-
-    frame_rgb = cv2.cvtColor(
-        frame,
-        cv2.COLOR_BGR2RGB
-    )
-
-    pil_face = Image.fromarray(face_img)
-
-    pil_frame = Image.fromarray(frame_rgb)
-
-    # =========================
-    # QUALITY SCORE
-    # =========================
-
-    try:
-
-        quality_score = face_quality_model.face_score(
-            pil_face,
-            pil_frame
-        )
-
-        print("Quality score:", quality_score)
-
-        return {
-            "quality": float(quality_score)
-        }
-
-    except Exception as e:
-
-        print("Quality error:", e)
-
-        return {
-            "quality": 0.0
-        }

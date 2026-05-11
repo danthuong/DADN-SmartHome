@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from deep_sort_realtime.deepsort_tracker import DeepSort
+from mqtt_client import SmartHomeMQTT 
 
 AI_URL = "http://localhost:8000/detect"
 
@@ -41,12 +42,20 @@ class RegisterRequest(BaseModel):
 # Camera Worker
 # ==============================
 DISPLAY_LOCAL = False   # bật/tắt hiển thị màn hình local
+mqtt = SmartHomeMQTT()
+mqtt.start()
+
 
 import threading
 import time
 from queue import Queue, Empty
 
 def camera_worker(camera_id, camera_url, cam_server_id, location, room):
+    host_counter = 0
+    HOST_MIN = 0
+    HOST_MAX = 5
+
+    last_state_mqtt = -1
 
     session = requests.Session()
     print(f"[INFO] Starting camera {camera_id}")
@@ -147,6 +156,7 @@ def camera_worker(camera_id, camera_url, cam_server_id, location, room):
     # THREAD 3: TRACKING
     # ===============================
     def tracking_loop():
+        nonlocal host_counter, last_state_mqtt
 
         tracker = DeepSort(
             max_age=15,
@@ -172,6 +182,8 @@ def camera_worker(camera_id, camera_url, cam_server_id, location, room):
             ds_inputs = []
             embeddings = []
 
+            host_present = False
+
             if detections:
 
                 for det in detections:
@@ -186,11 +198,33 @@ def camera_worker(camera_id, camera_url, cam_server_id, location, room):
                     ds_inputs.append(([x1, y1, w, h], 1.0, name))
                     embeddings.append(embedding)
 
+                    if name != "Unknown":
+                        host_present = True
+
+
                 tracks = tracker.update_tracks(ds_inputs, embeds=embeddings)
 
             else:
                 # không có detection -> chỉ predict
                 tracks = tracker.update_tracks([], embeds=[])
+
+            # =========================
+            # UPDATE COUNTER
+            # =========================
+            if host_present:
+                host_counter = min(HOST_MAX, host_counter + 1)
+            else:
+                host_counter = max(HOST_MIN, host_counter - 1)
+
+            # =========================
+            # STATE DECISION
+            # =========================
+            state = 1 if host_counter >= 3 else 0
+
+            # =========================
+            # MQTT
+            # =========================
+            print(f"[MQTT] host_counter={host_counter}, state={state}")
 
             # ======================
             # DRAW TRACKS

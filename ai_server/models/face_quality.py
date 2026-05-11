@@ -123,7 +123,7 @@ if __name__ == "__main__":
 
     model = MediaPipe_Heuristic()
 
-    img = Image.open("test_1.jpg")
+    img = Image.open("test.jpg")
 
     score = model.face_score(img, img)
 
