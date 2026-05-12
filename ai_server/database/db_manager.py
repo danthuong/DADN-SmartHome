@@ -125,7 +125,7 @@ class DatabaseManager:
         
         self.cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_servers (
-            user_id TEXT,
+            user_id INTEGER,
             cam_server_id TEXT,
             PRIMARY KEY (user_id, cam_server_id),
             FOREIGN KEY (user_id) REFERENCES users(id),
