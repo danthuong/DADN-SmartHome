@@ -20,7 +20,13 @@ from mqtt_client import SmartHomeMQTT
 
 print("[API SERVER] Đang khởi tạo kết nối MQTT ngầm...")
 mqtt = SmartHomeMQTT()
-mqtt.start() 
+mqtt.start()
+
+# Khởi tạo DB (tạo bảng nếu chưa có) — chỉ chạy 1 lần khi server start
+from database.db_manager import DatabaseManager
+_db_init = DatabaseManager("smart_home.db")
+_db_init.migrate_database()
+print("[API SERVER] DB initialized — tables ready.")
 
 # =========================================
 # 2. CẤU HÌNH BẢO MẬT & JWT TOKEN
