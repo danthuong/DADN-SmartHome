@@ -32,8 +32,6 @@ class DatabaseManager:
         # ==========================================
         # BẢNG CỦA TEAM MOBILE / WEB
         # ==========================================
-        self.cursor.execute("CREATE TABLE IF NOT EXISTS accounts (user_id TEXT PRIMARY KEY, user_name TEXT NOT NULL, password TEXT NOT NULL)")
-        
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, avatar TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -80,9 +78,9 @@ class DatabaseManager:
         
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS account_cameras (
-                user_id TEXT NOT NULL, camera_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL, camera_id TEXT NOT NULL,
                 PRIMARY KEY (user_id, camera_id),
-                FOREIGN KEY (user_id) REFERENCES accounts(user_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY (camera_id) REFERENCES cameras(camera_id) ON DELETE CASCADE
             )
         """)

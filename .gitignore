@@ -51,3 +51,9 @@ mobile_app/app/build/
 # ===============================
 .DS_Store
 Thumbs.db
+
+# ===============================
+# Accidental pip output / junk
+# ===============================
+ai_server/jwt
+ai_server/sqlite3
