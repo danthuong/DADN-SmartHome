@@ -1,7 +1,10 @@
 package com.example.android_app.ui.screens
 
+import android.Manifest
 import android.content.Context
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -138,8 +141,40 @@ fun DashboardScreen(
 
     val calendar = Calendar.getInstance()
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
-    val weatherIcon = if (hour in 6..17) Icons.Default.WbSunny else Icons.Default.NightsStay
-    val weatherText = if (hour in 6..17) strings.sun else strings.clear
+
+    // --- THỜI TIẾT THEO VỊ TRÍ ---
+    var weatherInfo by remember { mutableStateOf<WeatherInfo?>(null) }
+    val scope = rememberCoroutineScope()
+    val fetchWeather: () -> Unit = {
+        scope.launch {
+            WeatherHelper.fetchWeatherForCurrentLocation(context)
+                .onSuccess { weatherInfo = it }
+                .onFailure { println("Weather fetch failed: ${it.message}") }
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
+            fetchWeather()
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (WeatherHelper.hasLocationPermission(context)) {
+            fetchWeather()
+        } else {
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
+    }
+
+    val isDay = weatherInfo?.isDay ?: (hour in 6..17)
+    val weatherIcon = if (isDay) Icons.Default.WbSunny else Icons.Default.NightsStay
+    val weatherDesc = weatherInfo?.description ?: if (isDay) strings.sun else strings.clear
+    val weatherTempText = weatherInfo?.let { "${it.temperatureC.toInt()}°C" } ?: "--°C"
     var showAddDeviceDialog by remember { mutableStateOf(false) }
 
     var showCreatePresetSheet by remember { mutableStateOf(false) }
@@ -201,7 +236,11 @@ fun DashboardScreen(
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(strings.welcome, style = MaterialTheme.typography.bodySmall)
-                        Text(user.fullName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = user.fullName.ifBlank { user.username },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
                         Spacer(modifier = Modifier.weight(1f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -212,7 +251,7 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "28°C - $weatherText", // Ví dụ: 28°C - Trời nắng
+                                text = "$weatherTempText - $weatherDesc",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium
                             )
@@ -223,7 +262,7 @@ fun DashboardScreen(
                 // Card Temp (Chiếm 35%)
                 SensorCard(
                     title = strings.temp,
-                    value = "28°C",
+                    value = weatherTempText,
                     modifier = Modifier.weight(0.35f).fillMaxHeight()
                 )
             }

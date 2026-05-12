@@ -20,7 +20,6 @@ mediapipe
 ultralytics
 # torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python-dotenv
-request
 requests
 Adafruit_IO
 fastapi

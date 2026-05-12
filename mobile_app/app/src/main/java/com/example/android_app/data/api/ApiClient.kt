@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 
 object ApiClient {
     // THAY ĐỔI IP NÀY THEO MÁY CỦA BẠN
-    private const val BASE_URL = "http://100.126.85.58:8000/"
+    private const val BASE_URL = "http://172.20.10.12:8000/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
@@ -28,4 +28,12 @@ object ApiClient {
         .build()
 
     val apiService: DADNApiService = retrofit.create(DADNApiService::class.java)
+
+    private val weatherRetrofit: Retrofit = Retrofit.Builder()
+        .baseUrl("https://api.open-meteo.com/")
+        .client(okHttpClient)
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+
+    val weatherService: WeatherService = weatherRetrofit.create(WeatherService::class.java)
 }
