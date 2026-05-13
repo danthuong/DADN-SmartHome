@@ -133,8 +133,8 @@ def get_current_environment():
     return db.get_latest_environment()
 
 @app.get("/api/status/devices", tags=["Live Status"])
-def list_all_devices_status():
-    return {"data": db.get_all_devices_status()}
+def list_all_devices_status(user_id: int = Depends(get_current_user_id)):
+    return {"data": db.get_all_devices_status(user_id)}
 
 # ==========================================
 # NHÓM 3: ĐIỀU KHIỂN USER DEVICE (cập nhật state_json + MQTT)
@@ -193,10 +193,9 @@ def list_user_devices(user_id: int = Depends(get_current_user_id)):
 
 @app.post("/api/devices", tags=["User Devices"])
 def create_user_device(req: DeviceCreate, user_id: int = Depends(get_current_user_id)):
-    #device_id = uuid.uuid4().hex
-    # Lấy trực tiếp ID do bên Mobile tự custom
-    db.add_user_device(user_id, req.device_id, req.name, req.type, req.roomId)
-    return {"success": True, "device_id": req.device_id}
+    device_id = req.device_id
+    db.add_user_device(user_id, device_id, req.name, req.type, req.roomId)
+    return {"success": True, "device_id": device_id}
 
 @app.delete("/api/devices/{device_id}", tags=["User Devices"])
 def delete_user_device_endpoint(device_id: str, user_id: int = Depends(get_current_user_id)):
@@ -268,4 +267,4 @@ def get_status_snapshot(user_id: int = Depends(get_current_user_id)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

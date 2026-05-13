@@ -148,57 +148,52 @@ object SmartHomeRepository {
 
     // --- 3. HÀM XỬ LÝ THEO roomID ---
 
-    // [QUAN TRỌNG] Thêm thiết bị vào phòng bằng roomID
-    // Lưu ý: Gọi API đồng bộ để đảm bảo có device_id từ server trước khi trả về
-    suspend fun addDevice(roomID: String, type: DeviceType, strings: AppStrings): SmartDevice {
-        // Lọc thiết bị cùng loại trong cùng roomID để đếm số thứ tự
-        val devicesInRoom = _devices.value.filter { it.roomID == roomID && it.type == type }
-        val nextNumber = devicesInRoom.size + 1
+    suspend fun addDevice(roomID: String, deviceId: String, name: String, strings: AppStrings): SmartDevice? {
+        val typeStr = if (deviceId.contains("LED", ignoreCase = true) || deviceId.contains("LIGHT", ignoreCase = true)) "light" else "fan"
+        val type = if (typeStr == "light") DeviceType.LIGHT else DeviceType.FAN
 
-        val typeName = if (type == DeviceType.LIGHT) strings.led else strings.fan
-        val newName = "$typeName $nextNumber"
-        val typeStr = if (type == DeviceType.LIGHT) "light" else "fan"
-
-        // Gọi API ĐỒNG BỘ (suspend) để lấy device_id từ server
-        val token = authToken ?: return if (type == DeviceType.LIGHT) 
-            SmartLight(UUID.randomUUID().toString(), newName, false, 50f, Color.White.toArgb(), roomID)
-        else
-            SmartFan(UUID.randomUUID().toString(), newName, false, 1f, false, false, roomID)
+        val token = authToken ?: return null
         
-        var serverDeviceId: String? = null
         try {
             val response = ApiClient.apiService.createDevice(
                 token,
-                DeviceCreateRequest(name = newName, type = typeStr, roomId = roomID)
+                DeviceCreateRequest(device_id = deviceId, name = name, type = typeStr, roomId = roomID)
             )
             if (response.success) {
-                serverDeviceId = response.device_id
+                val device = when(type) {
+                    DeviceType.LIGHT -> SmartLight(deviceId, name, false, 50f, Color.White.toArgb(), roomID)
+                    DeviceType.FAN -> SmartFan(deviceId, name, false, 1f, false, false, roomID)
+                }
+                _devices.update { it + device }
+                return device
             }
         } catch (e: Exception) {
             println("DEBUG: createDevice error - ${e.message}")
         }
-
-        // Nếu API lỗi, dùng UUID tạm
-        val finalDeviceId = serverDeviceId ?: UUID.randomUUID().toString()
-
-        val device = when(type) {
-            DeviceType.LIGHT -> SmartLight(finalDeviceId, newName, false, 50f, Color.White.toArgb(), roomID)
-            DeviceType.FAN -> SmartFan(finalDeviceId, newName, false, 1f, false, false, roomID)
-        }
-        
-        _devices.update { it + device }
-        return device
+        return null
     }
 
-    // Version sync cho AlertDialog (gọi trong coroutine)
-    fun addDeviceSync(roomID: String, type: DeviceType, strings: AppStrings, callback: (SmartDevice?) -> Unit) {
+    fun addDeviceSync(roomID: String, deviceId: String, name: String, strings: AppStrings, callback: (SmartDevice?) -> Unit) {
         kotlinx.coroutines.GlobalScope.launch {
             try {
-                val device = addDevice(roomID, type, strings)
+                val device = addDevice(roomID, deviceId, name, strings)
                 callback(device)
             } catch (e: Exception) {
                 println("DEBUG: addDeviceSync error - ${e.message}")
                 callback(null)
+            }
+        }
+    }
+
+    suspend fun fetchAvailableDevices(): Result<List<AvailableDevice>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val token = authToken ?: return@withContext Result.failure(Exception("No token"))
+                val response = ApiClient.apiService.getStatusDevices(token)
+                Result.success(response.data)
+            } catch (e: Exception) {
+                println("DEBUG: fetchAvailableDevices error - ${e.message}")
+                Result.failure(e)
             }
         }
     }

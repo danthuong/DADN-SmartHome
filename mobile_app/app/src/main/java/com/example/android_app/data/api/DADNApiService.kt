@@ -49,6 +49,9 @@ interface DADNApiService {
     @GET("api/status")
     suspend fun getStatus(@Header("Authorization") token: String): StatusResponse
 
+    @GET("api/status/devices")
+    suspend fun getStatusDevices(@Header("Authorization") token: String): StatusDevicesResponse
+
     @POST("api/users/avatar")
     suspend fun updateAvatar(
         @Header("Authorization") token: String,

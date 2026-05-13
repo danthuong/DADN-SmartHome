@@ -4,7 +4,7 @@ package com.example.android_app.data.api
 data class LoginRequest(val username: String, val password: String)
 data class RegisterRequest(val username: String, val password: String)
 data class DeviceControlRequest(val command: String, val value: Any?)
-data class DeviceCreateRequest(val name: String, val type: String, val roomId: String)
+data class DeviceCreateRequest(val device_id: String, val name: String, val type: String, val roomId: String)
 data class AvatarUpdateRequest(val avatar: String)
 data class RoomCreateRequest(val roomId: String, val name: String)
 
@@ -50,6 +50,15 @@ data class PresetUpdateRequest(
     val icon: String? = null,
     val roomId: String? = null,
     val deviceConfigs: Map<String, ApiDeviceConfig>? = null
+)
+
+data class StatusDevicesResponse(val data: List<AvailableDevice>)
+
+data class AvailableDevice(
+    val device_id: String,
+    val description: String,
+    val status: Int,
+    val is_added: Int
 )
 
 // API-friendly DeviceConfig (separate from app's DeviceConfig to avoid typealias issues)

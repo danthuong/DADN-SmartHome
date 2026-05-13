@@ -44,6 +44,8 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.toArgb
 import com.example.android_app.utils.getTranslatedEmojiCategories
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.alpha
+import com.example.android_app.data.api.AvailableDevice
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -284,7 +286,12 @@ fun DashboardScreen(
                         onClick = { selectedRoomID = id },
                         label = { Text(displayName) },
                         trailingIcon = {
-                            Icon(Icons.Default.Cancel, null, Modifier.size(16.dp).clickable { SmartHomeRepository.deleteRoom(id, user.username) })
+                            Icon(Icons.Default.Cancel, null, Modifier.size(16.dp).clickable { 
+                                SmartHomeRepository.deleteRoom(id, user.username) 
+                                if (selectedRoomID == id) {
+                                    selectedRoomID = roomIDs.firstOrNull { it != id } ?: ""
+                                }
+                            })
                         }
                     )
                 }
@@ -304,9 +311,13 @@ fun DashboardScreen(
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = {
-                    newPresetName = ""
-                    selectedConfigs.clear()
-                    showCreatePresetSheet = true
+                    if (selectedRoomID.isNotEmpty()) {
+                        newPresetName = ""
+                        selectedConfigs.clear()
+                        showCreatePresetSheet = true
+                    } else {
+                        android.widget.Toast.makeText(context, "Vui lòng tạo phòng trước!", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }) {
                     Icon(
                         imageVector = Icons.Default.AddCircle, // Dùng AddCircle cho giống phần Phòng
@@ -342,7 +353,13 @@ fun DashboardScreen(
                     color = Color.Gray,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { showAddDeviceDialog = true }) {
+                IconButton(onClick = { 
+                    if (selectedRoomID.isNotEmpty()) {
+                        showAddDeviceDialog = true 
+                    } else {
+                        android.widget.Toast.makeText(context, "Vui lòng tạo phòng trước!", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }) {
                     Icon(
                         imageVector = Icons.Default.AddCircle,
                         contentDescription = null,
@@ -565,21 +582,59 @@ fun DashboardScreen(
     }
 
     if (showAddDeviceDialog) {
+        var availableDevices by remember { mutableStateOf<List<AvailableDevice>>(emptyList()) }
+        var isLoading by remember { mutableStateOf(true) }
+
+        LaunchedEffect(Unit) {
+            val result = SmartHomeRepository.fetchAvailableDevices()
+            result.onSuccess { availableDevices = it }
+            isLoading = false
+        }
+
         AlertDialog(
             onDismissRequest = { showAddDeviceDialog = false },
             title = { Text(strings.addDevice) },
-            text = { Text("${strings.addDeviceAsk} ${selectedRoomID}?") },
-            confirmButton = {
-                Button(onClick = {
-                    SmartHomeRepository.addDeviceSync(selectedRoomID, DeviceType.LIGHT, strings) { }
-                    showAddDeviceDialog = false
-                }) { Text(strings.addLight) }
+            text = {
+                if (isLoading) {
+                    CircularProgressIndicator()
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                        items(availableDevices) { device ->
+                            val isAdded = device.is_added == 1
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp)
+                                    .alpha(if (isAdded) 0.5f else 1f)
+                                    .clickable(enabled = !isAdded) {
+                                        SmartHomeRepository.addDeviceSync(
+                                            roomID = selectedRoomID,
+                                            deviceId = device.device_id,
+                                            name = device.description,
+                                            strings = strings
+                                        ) { }
+                                        showAddDeviceDialog = false
+                                    },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (device.device_id.contains("LED", ignoreCase = true) || device.device_id.contains("LIGHT", ignoreCase = true)) Icons.Default.Lightbulb else Icons.Default.WindPower,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(32.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(device.description, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    Text("ID: ${device.device_id}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+                }
             },
-            dismissButton = {
-                Button(onClick = {
-                    SmartHomeRepository.addDeviceSync(selectedRoomID, DeviceType.FAN, strings) { }
-                    showAddDeviceDialog = false
-                }) { Text(strings.addFan) }
+            confirmButton = {
+                Button(onClick = { showAddDeviceDialog = false }) { Text("Đóng") }
             }
         )
     }

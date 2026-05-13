@@ -331,16 +331,18 @@ class DatabaseManager:
         light = self.cursor.fetchone()
         return {"temperature": dict(temp) if temp else None, "light": dict(light) if light else None}
 
-    def get_all_devices_status(self):
+    def get_all_devices_status(self, user_id):
         query = """
             SELECT d.device_id, d.description, 
                    COALESCE((SELECT status FROM device_logs 
                              WHERE device_id = d.device_id 
-                             ORDER BY timestamp DESC LIMIT 1), 0) as status
-            FROM devices d 
+                             ORDER BY timestamp DESC LIMIT 1), 0) as status,
+                   CASE WHEN ud.device_id IS NOT NULL THEN 1 ELSE 0 END as is_added
+            FROM devices d
+            LEFT JOIN user_devices ud ON d.device_id = ud.device_id AND ud.user_id = ?
             WHERE d.device_id NOT LIKE 'SET_%'
         """
-        self.cursor.execute(query)
+        self.cursor.execute(query, (user_id,))
         return [dict(row) for row in self.cursor.fetchall()]
 
     def get_camera_logs(self, user_id, limit):
