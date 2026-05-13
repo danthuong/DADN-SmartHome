@@ -35,3 +35,5 @@ insightface
 onnxruntime-gpu
 
 pinecone
+
+websocket

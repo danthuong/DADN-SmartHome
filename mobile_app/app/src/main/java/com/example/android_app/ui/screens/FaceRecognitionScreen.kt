@@ -2,6 +2,15 @@ package com.example.android_app.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,38 +26,42 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import com.example.android_app.utils.AppStrings
-import android.view.ViewGroup
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.android_app.utils.AppStrings
+import com.example.android_app.utils.FaceWebSocketClient
+import com.example.android_app.utils.toJpegByteArray
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.util.concurrent.Executors
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FaceRecognitionScreen(strings: AppStrings, onBack: () -> Unit) {
+fun FaceRecognitionScreen(strings: AppStrings, loggedInUsername: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var userName by remember { mutableStateOf("") }
-    var userRole by remember { mutableStateOf("Owner") }
-    var step by remember { mutableStateOf(1) }
-
+    // --- STATES ---
+    var isScanning by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(true) }
 
+    // States để thông báo cho User
+    var statusMessage by remember { mutableStateOf("Vui lòng nhìn thẳng và bấm Bắt đầu quét") }
+    var isSuccess by remember { mutableStateOf(false) }
+
+    // --- STATES LẤY DANH SÁCH SERVER ---
+    var camServerIdsStr by remember { mutableStateOf("") }
+    var serverCount by remember { mutableStateOf(0) }
+    var isFetchingServers by remember { mutableStateOf(true) }
 
     val smoothBack: () -> Unit = {
         showCamera = false
@@ -58,9 +71,7 @@ fun FaceRecognitionScreen(strings: AppStrings, onBack: () -> Unit) {
         }
     }
 
-    BackHandler(enabled = true) {
-        smoothBack()
-    }
+    BackHandler(enabled = true) { smoothBack() }
 
     // --- QUẢN LÝ QUYỀN CAMERA ---
     var hasCameraPermission by remember {
@@ -70,32 +81,92 @@ fun FaceRecognitionScreen(strings: AppStrings, onBack: () -> Unit) {
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasCameraPermission = isGranted
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted -> hasCameraPermission = isGranted }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    // Tự động xin quyền ngay khi vào màn hình
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+    // --- GỌI API LẤY DANH SÁCH NHÀ (SERVER) TỰ ĐỘNG ---
+    LaunchedEffect(loggedInUsername) {
+        if (loggedInUsername.isNotBlank()) {
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                try {
+                    val client = OkHttpClient()
+                    val url = "http://100.126.85.58:8000/cameras?account=$loggedInUsername"
+
+                    val request = Request.Builder().url(url).build()
+                    val response = client.newCall(request).execute()
+
+                    if (response.isSuccessful) {
+                        val jsonResponse = JSONObject(response.body!!.string())
+                        val serversArray = jsonResponse.optJSONArray("servers")
+
+                        val idList = mutableListOf<String>()
+                        if (serversArray != null) {
+                            for (i in 0 until serversArray.length()) {
+                                val obj = serversArray.getJSONObject(i)
+                                idList.add(obj.getString("cam_server_id"))
+                            }
+                        }
+                        serverCount = idList.size
+                        // Nối các ID lại bằng dấu phẩy (vd: "server1,server2")
+                        camServerIdsStr = idList.joinToString(",")
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    isFetchingServers = false
+                }
+            }
+        } else {
+            isFetchingServers = false
         }
     }
 
-    // --- TRẠNG THÁI QUÉT ---
-    var isScanning by remember { mutableStateOf(false) }
-    var scanCompleted by remember { mutableStateOf(false) }
+    // --- KHỞI TẠO WEBSOCKET CLIENT ---
+    val webSocketClient = remember {
+        FaceWebSocketClient(
+            onMessage = { type, json ->
+                when (type) {
+                    "processing" -> {
+                        val progress = json.optString("progress", "")
+                        statusMessage = "Đang lấy mẫu: $progress"
+                    }
+                    "success" -> {
+                        statusMessage = "Đăng ký thành công!"
+                        isScanning = false
+                        isSuccess = true
+                        coroutineScope.launch(Dispatchers.Main) {
+                            delay(1500)
+                            smoothBack()
+                        }
+                    }
+                    "low_quality" -> statusMessage = "Ảnh mờ, vui lòng giữ điện thoại tĩnh!"
+                    "no_face_detected" -> statusMessage = "Không tìm thấy khuôn mặt!"
+                    "more_than_one" -> statusMessage = "Chỉ được có 1 người trong khung hình!"
+                    "spoof_detected" -> statusMessage = "CẢNH BÁO: Phát hiện ảnh giả mạo!"
+                    "error" -> statusMessage = "Lỗi máy chủ!"
+                }
+            },
+            onClosed = {
+                if (!isSuccess) statusMessage = "Đã ngắt kết nối với Server"
+            }
+        )
+    }
+
+    DisposableEffect(Unit) {
+        webSocketClient.connect()
+        onDispose { webSocketClient.disconnect() }
+    }
 
     val scanLineY = remember { Animatable(0f) }
-
     LaunchedEffect(isScanning) {
         if (isScanning) {
             scanLineY.animateTo(
                 targetValue = 380f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                )
+                animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse)
             )
         } else {
             scanLineY.snapTo(0f)
@@ -121,170 +192,178 @@ fun FaceRecognitionScreen(strings: AppStrings, onBack: () -> Unit) {
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (step == 1) {
-                Text(
-                    text = if (isScanning) strings.scanning else strings.faceInstruction,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (isScanning) MaterialTheme.colorScheme.primary else Color.Gray
-                )
+            // 1. NHẬP THÔNG TIN TRƯỚC KHI QUÉT
+            OutlinedTextField(
+                value = loggedInUsername,
+                onValueChange = { },
+                label = { Text("Tên người dùng") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                readOnly = true,
+                enabled = false
+            )
 
-                Spacer(modifier = Modifier.height(32.dp))
+            // Dòng text thông báo số lượng server sẽ được đồng bộ
+            if (isFetchingServers) {
+                Text("Đang tải dữ liệu Camera Server...", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+            } else if (serverCount > 0) {
+                Text("Sẽ đồng bộ khuôn mặt lên $serverCount khu vực", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+            } else {
+                Text("Chưa có Camera Server nào được liên kết!", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
 
-                Box(
-                    modifier = Modifier
-                        .width(260.dp)
-                        .height(380.dp)
-                        .clip(RoundedCornerShape(200.dp))
-                        .background(Color.Black.copy(alpha = 0.05f))
-                        .border(
-                            width = 4.dp,
-                            color = if (isScanning) MaterialTheme.colorScheme.primary else Color.LightGray,
-                            shape = RoundedCornerShape(200.dp)
-                        ),
-                    contentAlignment = Alignment.TopCenter
-                ) {
-                    // HIỂN THỊ CAMERA NẾU CÓ QUYỀN
-                    if (hasCameraPermission && showCamera) {
-                        CameraPreview(modifier = Modifier.fillMaxSize())
-                    } else {
-                        // Hiển thị Placeholder nếu chưa cấp quyền
-                        Icon(
-                            Icons.Default.Face,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(60.dp),
-                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
-                        )
-                    }
+            Spacer(modifier = Modifier.height(16.dp))
 
-                    // THANH QUÉT CHẠY LÊN XUỐNG
-                    if (isScanning) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .offset(y = scanLineY.value.dp)
-                                .background(
-                                    Brush.horizontalGradient(
-                                        listOf(Color.Transparent, MaterialTheme.colorScheme.primary, Color.Transparent)
-                                    )
-                                )
-                        )
-                    }
-                }
+            Text(
+                text = statusMessage,
+                style = MaterialTheme.typography.bodyLarge,
+                color = when {
+                    isSuccess -> Color(0xFF4CAF50)
+                    statusMessage.contains("mờ") || statusMessage.contains("giả mạo") -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.primary
+                },
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
 
-                Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-                Button(
-                    onClick = {
-                        if (isScanning) {
-                            isScanning = false
-                            scanCompleted = true
-                        } else {
-                            // Chỉ cho phép bắt đầu quét khi đã có quyền camera
-                            if (hasCameraPermission) {
-                                isScanning = true
-                                scanCompleted = false
-                            } else {
-                                permissionLauncher.launch(Manifest.permission.CAMERA)
+            Box(
+                modifier = Modifier
+                    .width(260.dp)
+                    .height(380.dp)
+                    .clip(RoundedCornerShape(200.dp))
+                    .background(Color.Black.copy(alpha = 0.05f))
+                    .border(
+                        width = 4.dp,
+                        color = if (isScanning) MaterialTheme.colorScheme.primary else Color.LightGray,
+                        shape = RoundedCornerShape(200.dp)
+                    ),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                if (hasCameraPermission && showCamera) {
+                    StreamingCameraPreview(
+                        isScanning = isScanning,
+                        onFrameCaptured = { jpegBytes ->
+                            // Đẩy frame lên Server, kèm theo chuỗi ID đã gộp
+                            if (camServerIdsStr.isNotEmpty()) {
+                                webSocketClient.sendFrame(jpegBytes, loggedInUsername, camServerIdsStr)
                             }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
-                ) {
-                    Text(if (isScanning) strings.stopScan else strings.startScan)
+                } else {
+                    Icon(
+                        Icons.Default.Face, contentDescription = null,
+                        modifier = Modifier.fillMaxSize().padding(60.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (scanCompleted) {
-                    OutlinedButton(
-                        onClick = { step = 2 },
+                if (isScanning) {
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text(strings.continueBtn)
+                            .height(4.dp)
+                            .offset(y = scanLineY.value.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(Color.Transparent, MaterialTheme.colorScheme.primary, Color.Transparent)
+                                )
+                            )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = {
+                    if (isScanning) {
+                        isScanning = false
+                        statusMessage = "Đã dừng quét"
+                    } else {
+                        if (serverCount == 0) {
+                            statusMessage = "Lỗi: Bạn chưa có Server nào để lưu mặt!"
+                            return@Button
+                        }
+                        if (hasCameraPermission) {
+                            isScanning = true
+                            statusMessage = "Đang kết nối để phân tích..."
+                        } else {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
                     }
-                }
-
-            } else {
-                // ... (PHẦN BƯỚC 2 GIỮ NGUYÊN NHƯ CODE CŨ CỦA BẠN) ...
-                Text(
-                    text = "Xác nhận thông tin",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                // Nút bị khóa nếu đang fetch server hoặc không có server nào
+                enabled = !isSuccess && !isFetchingServers && serverCount > 0,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                OutlinedTextField(
-                    value = userName,
-                    onValueChange = { userName = it },
-                    label = { Text(strings.username) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = userRole,
-                    onValueChange = { userRole = it },
-                    label = { Text(strings.role) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                Button(
-                    onClick = {
-                        // TODO: Gửi dữ liệu lên server
-                        onBack()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text(strings.save)
-                }
+            ) {
+                Text(if (isScanning) strings.stopScan else strings.startScan)
             }
         }
     }
 }
 
+// ==========================================
+// COMPOSABLE CAMERA STREAMING (GIỮ NGUYÊN)
+// ==========================================
 @Composable
-fun CameraPreview(modifier: Modifier = Modifier) {
+fun StreamingCameraPreview(
+    isScanning: Boolean,
+    onFrameCaptured: (ByteArray) -> Unit,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val executor = remember { Executors.newSingleThreadExecutor() }
+
+    val latestIsScanning by rememberUpdatedState(isScanning)
+    val latestOnFrameCaptured by rememberUpdatedState(onFrameCaptured)
 
     AndroidView(
         factory = { ctx ->
             val previewView = PreviewView(ctx).apply {
-                this.scaleType = PreviewView.ScaleType.FILL_CENTER
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
+                scaleType = PreviewView.ScaleType.FILL_CENTER
             }
 
             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
-
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
+                }
+
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                    .build()
+
+                var lastTimeAnalyzed = 0L
+
+                imageAnalysis.setAnalyzer(executor) { imageProxy ->
+                    if (latestIsScanning) {
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastTimeAnalyzed >= 300) {
+                            lastTimeAnalyzed = currentTime
+
+                            try {
+                                val bitmap = imageProxy.toBitmap()
+                                val stream = java.io.ByteArrayOutputStream()
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, stream)
+                                val jpegBytes = stream.toByteArray()
+                                latestOnFrameCaptured(jpegBytes)
+                            } catch (e: Exception) {
+                                android.util.Log.e("FaceWS", "Lỗi convert ảnh: ${e.message}")
+                            }
+                        }
+                    }
+                    imageProxy.close()
                 }
 
                 val cameraSelector = CameraSelector.Builder()
@@ -293,7 +372,9 @@ fun CameraPreview(modifier: Modifier = Modifier) {
 
                 try {
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner, cameraSelector, preview, imageAnalysis
+                    )
                 } catch (exc: Exception) {
                     exc.printStackTrace()
                 }
@@ -301,13 +382,13 @@ fun CameraPreview(modifier: Modifier = Modifier) {
 
             previewView
         },
-        // THÊM ĐOẠN NÀY ĐỂ GIẢI PHÓNG CAMERA KHI THOÁT
         onRelease = {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
                 cameraProvider.unbindAll()
             }, ContextCompat.getMainExecutor(context))
+            executor.shutdown()
         },
         modifier = modifier
     )

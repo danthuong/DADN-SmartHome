@@ -237,6 +237,7 @@ fun AppNavigation(
         composable("face_scan") {
             FaceRecognitionScreen(
                 strings = strings,
+                loggedInUsername = currentUser?.username ?: "",
                 onBack = { navController.popBackStack() }
             )
         }

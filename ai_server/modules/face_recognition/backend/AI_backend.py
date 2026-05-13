@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import torch
+import base64
+
 from fastapi import FastAPI, UploadFile, File, Form
 from models.face_quality import MediaPipe_Heuristic
 from models.recognition import ModelFactory
@@ -369,7 +371,7 @@ async def detect(
 
 @app.get("/cameras")
 def get_cameras(account: str):
-
+    print("Getting cameras for account:", account)
     servers = camera_account_db.get_servers(
         account
     )
@@ -479,109 +481,133 @@ def score_face_quality(frame, bbox, save_debug=True, frame_id=None):
 
 
 # ===============================
-# REGISTER API
+# REGISTER API 
 # ===============================
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 import cv2
 import numpy as np
 
 @app.websocket("/ws/register")
 async def register_ws(websocket: WebSocket):
-
     await websocket.accept()
+    
+    # Chỉ cần gom đủ 3-5 frame ĐÃ ĐẠT CHUẨN
+    MAX_FRAMES_TO_CHECK = 5 
+    frame_count = 0
+    
+    best_score = -1.0
+    best_face_data_list = []
 
     try:
         while True:
-
             data = await websocket.receive_json()
 
-            # =====================
-            # DECODE INPUT
-            # =====================
-            frame_bytes = data["file"]
+            base64_str = data["file"] # Lúc này file nhận được là chuỗi Base64
             name = data["name"]
             cam_server_id = data["cam_server_id"]
 
-            np_arr = np.frombuffer(bytearray(frame_bytes), np.uint8)
+            # BẢN UPDATE: Giải mã Base64 ngược lại thành byte array
+            frame_bytes = base64.b64decode(base64_str)
+            np_arr = np.frombuffer(frame_bytes, np.uint8)
             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
             if frame is None:
-                await websocket.send_json({
-                    "message": "invalid_frame"
-                })
+                await websocket.send_json({"message": "invalid_frame"})
                 continue
 
-            QUALITY_THRESHOLD = 0.5
+            QUALITY_THRESHOLD = 0.6
 
             faces = detect_face(model, frame)
 
             if len(faces) == 0:
-                await websocket.send_json({
-                    "message": "no_face_detected"
-                })
+                await websocket.send_json({"message": "no_face_detected"})
+                continue
+                
+            if len(faces) > 1:
+                await websocket.send_json({"message": "more_than_one"})
                 continue
 
-            face_list = []
-
+            face = faces[0]
+            x1, y1, x2, y2 = map(int, face.bbox)
             h, w = frame.shape[:2]
+            
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+            bbox = (x1, y1, x2, y2)
 
-            for idx, face in enumerate(faces):
+            # --- ANTI-SPOOFING ---
+            spoof_result = check_spoof(frame, bbox)
+            if spoof_result == "fake":
+                print(f"[CẢNH BÁO] Phát hiện mặt giả mạo từ user: {name}")
+                await websocket.send_json({"message": "spoof_detected"})
+                continue 
 
-                x1, y1, x2, y2 = map(int, face.bbox)
+            # --- QUALITY CHECK ---
+            result = score_face_quality(frame=frame, bbox=bbox, save_debug=False)
+            quality = result.get("quality", 0.0)
+            face_img = result.get("face_img", None)
 
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w, x2), min(h, y2)
-
-                bbox = (x1, y1, x2, y2)
-
-                result = score_face_quality(
-                    frame=frame,
-                    bbox=bbox,
-                    frame_id=idx,
-                    save_debug=False,
-                )
-
-                quality = result.get("quality", 0.0)
-                face_img = result.get("face_img", None)
-
-                print("QUALITY RESULT:", quality)
-
-                if face_img is not None and quality >= QUALITY_THRESHOLD:
-
-                    info = Info(
-                        name=name,
-                        cam_server_id=cam_server_id
-                    )
-
-                    face_list.append((face_img, face, info))
-
-            # =====================
-            # RULES (GIỮ NGUYÊN 100%)
-            # =====================
-
-            if len(face_list) == 0:
-                await websocket.send_json({
-                    "message": "no_valid_face"
-                })
+            if face_img is None:
                 continue
 
-            if len(face_list) > 1:
+            # ==========================================
+            # LOGIC MỚI: XÉT DUYỆT NGHIÊM NGẶT
+            # ==========================================
+            if quality >= QUALITY_THRESHOLD:
+                # 1. Đạt chuẩn -> Tăng counter
+                frame_count += 1
+                
+                # 2. So sánh và lấy Max Score (Prev Best vs Cur)
+                if quality > best_score:
+                    best_score = quality
+                    server_id_list = [sid.strip() for sid in cam_server_id.split(",") if sid.strip()]
+                    best_face_data_list.clear()
+                    for s_id in server_id_list:
+                        info = Info(name=name, cam_server_id=s_id)
+                        best_face_data_list.append((face_img, face, info))
+                        
+                    print(f"[CẬP NHẬT KỶ LỤC] New Best Score: {best_score:.3f}")
+                
                 await websocket.send_json({
-                    "message": "more_than_one"
+                    "message": "processing",
+                    "progress": f"{frame_count}/{MAX_FRAMES_TO_CHECK}"
                 })
-                continue
 
-            ids = add_face(db, face_list)
-            cam_server_cache.clear()
+                if frame_count >= MAX_FRAMES_TO_CHECK:
+                    print(f"Đồng bộ khuôn mặt lên {len(best_face_data_list)} servers.")
+                    
+                    # BẢN UPDATE: Truyền nguyên cái list chứa nhiều server vào
+                    ids = add_face(db, best_face_data_list) 
+                    cam_server_cache.clear()
 
-            await websocket.send_json({
-                "message": "success",
-            })
+                    await websocket.send_json({
+                        "message": "success",
+                        "face_id": ids[0] # Lấy ID đầu tiên tượng trưng
+                    })
+                    break
 
+            else:
+                print(f"Loại bỏ frame mờ (Score: {quality:.3f})")
+                await websocket.send_json({
+                    "message": "low_quality", 
+                    "score": quality 
+                })
+
+    except WebSocketDisconnect:
+        print("Mobile App disconnected")
     except Exception as e:
         print("WS ERROR:", e)
-        await websocket.close()
+        try:
+             await websocket.send_json({"message": "error", "detail": str(e)})
+        except:
+             pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+
 
 # ===============================
 # SERVER REGISTER API 
