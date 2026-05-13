@@ -176,12 +176,17 @@ def control_device(
 # NHÓM 4: TRUY XUẤT NHẬT KÝ (LOGS)
 # ==========================================
 @app.get("/api/logs/cameras", tags=["Logs Dashboard"])
-def get_camera_logs(limit: int = 10):
-    return {"data": db.get_camera_logs(limit)}
+def get_camera_logs(limit: int = 10, user_id: int = Depends(get_current_user_id)):
+    return {"data": db.get_camera_logs(user_id, limit)}
 
 @app.get("/api/logs/sensors", tags=["Logs Dashboard"])
 def get_sensor_logs(sensor_id: str = None, limit: int = 20):
     return {"data": db.get_sensor_logs(sensor_id, limit)}
+
+@app.get("/api/users/me", tags=["User"])
+def get_current_user_info(user_id: int = Depends(get_current_user_id)):
+    """API giúp lấy ra user_id hiện tại từ Token (Hỗ trợ cho phần Face Recognition của AI)"""
+    return {"success": True, "user_id": user_id}
 
 # ==========================================
 # NHÓM 7: USER DEVICES (CRUD)
