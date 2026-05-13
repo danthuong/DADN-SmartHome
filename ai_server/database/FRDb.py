@@ -299,19 +299,30 @@ class HybridFaceDB(FRDb):
     # INSERT FACE
     # ======================================
 
+    # ======================================
+    # INSERT OR UPDATE FACE
+    # ======================================
+
     def updateEmbedding(
         self,
         info: Info,
         embedding,
         img
     ):
+        # 1. KIỂM TRA XEM USER ĐÃ TỒN TẠI CHƯA
+        # Hàm search_faces sẽ tìm theo name và cam_server_id có trong biến info
+        existing_faces = self.sql.search_faces(info)
+        
+        is_new_user = len(existing_faces) == 0
 
-        # UUID
-        face_id = str(
-            uuid.uuid4()
-        )
+        if is_new_user:
+            # Nếu chưa tồn tại -> Tạo UUID mới
+            face_id = str(uuid.uuid4())
+        else:
+            # Nếu đã tồn tại -> Lấy lại ID cũ để tiến hành ghi đè
+            face_id = existing_faces[0][0] # existing_faces trả về list các tuple (id, name)
 
-        # SAVE IMAGE
+        # 2. LƯU ẢNH (Nếu ID cũ thì nó sẽ tự động ghi đè file ảnh cũ)
         img_path = os.path.join(
             self.image_dir,
             f"{face_id}.jpg"
@@ -322,21 +333,19 @@ class HybridFaceDB(FRDb):
             img
         )
 
-        # ==================================
-        # SQLITE
-        # ==================================
+        # 3. LƯU VÀO SQLITE (Chỉ INSERT nếu là user mới)
+        if is_new_user:
+            self.sql.insert_face(
+                face_id=face_id,
+                name=info.name,
+                cam_server_id=info.cam_server_id,
+                img_path=img_path
+            )
 
-        self.sql.insert_face(
-            face_id=face_id,
-            name=info.name,
-            cam_server_id=info.cam_server_id,
-            img_path=img_path
-        )
-
-        # ==================================
-        # PINECONE
-        # ==================================
-
+        # 4. LƯU VÀO PINECONE
+        # Hàm upsert của Pinecone hoạt động như sau:
+        # - Nếu face_id chưa có -> Thêm vector mới
+        # - Nếu face_id đã có -> Ghi đè vector cũ bằng vector mới (cập nhật khuôn mặt)
         self.vector.upsert_embedding(
             face_id=face_id,
             embedding=embedding,

@@ -322,7 +322,7 @@ class DatabaseManager:
         return self.cursor.rowcount > 0
 
     # ==========================================
-    # CÁC HÀM GET CHUYÊN DỤNG CHO API (MỚI THÊM)
+    # CÁC HÀM GET CHUYÊN DỤNG CHO API 
     # ==========================================
     def get_latest_environment(self):
         self.cursor.execute("SELECT value, timestamp FROM sensor_logs WHERE sensor_id='TEMP' ORDER BY timestamp DESC LIMIT 1")
