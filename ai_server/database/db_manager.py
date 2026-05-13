@@ -6,6 +6,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 class DatabaseManager:
     def __init__(self, db_name="smart_home.db"):
         self.conn = sqlite3.connect(db_name, check_same_thread=False)
+        # Bật row_factory để dễ dàng parse dữ liệu thành Dictionary cho FastAPI
+        self.conn.row_factory = sqlite3.Row 
         self.cursor = self.conn.cursor()
         
         # Cơ chế khóa luồng cực xịn của team Mobile
@@ -21,6 +23,7 @@ class DatabaseManager:
                 
         self.create_tables()
         self.init_master_data()
+        self.migrate_database()
 
     def _with_lock(self, method):
         def wrapper(*args, **kwargs):
@@ -29,9 +32,7 @@ class DatabaseManager:
         return wrapper
 
     def create_tables(self):
-        # ==========================================
-        # BẢNG CỦA TEAM MOBILE / WEB
-        # ==========================================
+        # [GIỮ NGUYÊN CODE TẠO BẢNG CỦA BẠN]
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, avatar TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -59,19 +60,13 @@ class DatabaseManager:
             )
         """)
 
-        # ==========================================
-        # BẢNG CỦA TEAM IOT / CAMERA
-        # ==========================================
         self.cursor.execute("CREATE TABLE IF NOT EXISTS cameras (camera_id TEXT PRIMARY KEY, location TEXT)")
         self.cursor.execute("CREATE TABLE IF NOT EXISTS sensors (sensor_id TEXT PRIMARY KEY, description TEXT)")
         self.cursor.execute("CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, description TEXT)")
         
         self.cursor.execute("""
         CREATE TABLE IF NOT EXISTS faces (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            cam_server_id TEXT,
-            img_path TEXT,
+            id TEXT PRIMARY KEY, name TEXT, cam_server_id TEXT, img_path TEXT,
             FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
         )
         """)
@@ -85,9 +80,6 @@ class DatabaseManager:
             )
         """)
 
-        # ==========================================
-        # CÁC BẢNG LOGS (HỢP NHẤT HOÀN HẢO)
-        # ==========================================
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS camera_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, camera_id TEXT NOT NULL, has_human INTEGER DEFAULT 0, face_id TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -116,15 +108,11 @@ class DatabaseManager:
             )
         """)
 
-        # ======================
-        # SERVER CỦA TEAM MOBILE
-        # ======================
         self.cursor.execute("CREATE TABLE IF NOT EXISTS servers (cam_server_id TEXT PRIMARY KEY, location TEXT, url TEXT)")
         
         self.cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_servers (
-            user_id INTEGER,
-            cam_server_id TEXT,
+            user_id INTEGER, cam_server_id TEXT,
             PRIMARY KEY (user_id, cam_server_id),
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (cam_server_id) REFERENCES servers(cam_server_id)
@@ -133,7 +121,6 @@ class DatabaseManager:
         self.conn.commit()
 
     def init_master_data(self):
-        # Đã khôi phục SET_TEMP và SET_LIGHT cho IoT
         self.cursor.execute("INSERT OR IGNORE INTO cameras VALUES ('CAM_01', 'Phòng Khách')")
         sensors = [('AI_CAM', 'Camera AI nhận diện người'), ('PIR', 'Cảm biến hồng ngoại'), ('TEMP', 'Cảm biến nhiệt độ'), ('LIGHT', 'Cảm biến ánh sáng')]
         devices = [
@@ -147,8 +134,21 @@ class DatabaseManager:
         self.cursor.executemany("INSERT OR IGNORE INTO devices VALUES (?,?)", devices)
         self.conn.commit()
 
+    def migrate_database(self):
+        try:
+            self.cursor.execute("ALTER TABLE users ADD COLUMN avatar TEXT")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            self.cursor.execute("ALTER TABLE user_presets ADD COLUMN preset_id TEXT")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
     # ==========================================
-    # CÁC HÀM GHI LOG (HỖ TRỢ CẢ MOBILE VÀ IOT)
+    # CÁC HÀM GHI LOG
     # ==========================================
     def log_sensor(self, sensor_id, value, user_name="N/A"):
         self.cursor.execute("INSERT INTO sensor_logs (sensor_id, value, user_name) VALUES (?, ?, ?)", (sensor_id, value, user_name))
@@ -163,77 +163,40 @@ class DatabaseManager:
         self.conn.commit()
 
     def log_device(self, device_id, status, trigger_source, threshold=0):
-        # Đổi tên biến về trigger_source để khớp với Logger Service
         self.cursor.execute(
             "INSERT INTO device_logs (device_id, status, trigger_source, threshold_used) VALUES (?, ?, ?, ?)",
             (device_id, status, trigger_source, threshold)
         )
         self.conn.commit()
 
-    # =========================================================================
-    # CÁC HÀM CÒN LẠI CỦA TEAM MOBILE (GIỮ NGUYÊN KHÔNG ĐỤNG CHẠM)
-    # =========================================================================
-    
-    def migrate_database(self):
-        try:
-            self.cursor.execute("ALTER TABLE users ADD COLUMN avatar TEXT")
-            self.conn.commit()
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            self.cursor.execute("ALTER TABLE user_presets ADD COLUMN preset_id TEXT")
-            self.conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
+    # ==========================================
+    # USER & AUTH
+    # ==========================================
     def create_user(self, username, password):
-
         hashed = generate_password_hash(password)
-
         try:
-            # 1. INSERT USER TRƯỚC
-            self.cursor.execute(
-                "INSERT INTO users (username, password) VALUES (?, ?)",
-                (username, hashed)
-            )
-
-            user_id = self.cursor.lastrowid   # ✅ LẤY ID NGAY SAU INSERT
-
-            # 2. AUTO LINK CAMERA SERVERS
+            self.cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed))
+            user_id = self.cursor.lastrowid
+            
             self.cursor.execute("SELECT cam_server_id FROM servers")
             servers = self.cursor.fetchall()
-
-            for (cam_server_id,) in servers:
+            for row in servers:
                 self.cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO user_servers (user_id, cam_server_id)
-                    VALUES (?, ?)
-                    """,
-                    (user_id, cam_server_id)
+                    "INSERT OR IGNORE INTO user_servers (user_id, cam_server_id) VALUES (?, ?)",
+                    (user_id, row["cam_server_id"]) # Đã dùng row_factory nên truy cập qua key
                 )
-
             self.conn.commit()
-
-            print(f"[OK] Auto linked {len(servers)} camera servers to user {username}")
-
-            return {
-                "success": True,
-                "user_id": user_id
-            }
-
+            return {"success": True, "user_id": user_id}
         except sqlite3.IntegrityError:
-            return {
-                "success": False,
-                "message": "Username already exists"
-            }
+            return {"success": False, "message": "Username already exists"}
 
     def get_user(self, username):
         self.cursor.execute("SELECT id, username, password, avatar FROM users WHERE username = ?", (username,))
         row = self.cursor.fetchone()
-        if row:
-            return {"id": row[0], "username": row[1], "password": row[2], "avatar": row[3]}
-        return None
+        return dict(row) if row else None
+
+    def verify_password(self, stored_password, provided_password):
+        return check_password_hash(stored_password, provided_password)
 
     def update_user_avatar(self, user_id, avatar_data):
         self.cursor.execute("UPDATE users SET avatar = ? WHERE id = ?", (avatar_data, user_id))
@@ -243,11 +206,11 @@ class DatabaseManager:
     def get_user_avatar(self, user_id):
         self.cursor.execute("SELECT avatar FROM users WHERE id = ?", (user_id,))
         row = self.cursor.fetchone()
-        return row[0] if row else None
+        return row["avatar"] if row else None
 
-    def verify_password(self, stored_password, provided_password):
-        return check_password_hash(stored_password, provided_password)
-
+    # ==========================================
+    # QUẢN LÝ THIẾT BỊ (USER DEVICES)
+    # ==========================================
     def add_user_device(self, user_id, device_id, name, device_type, room_id="LIVING", state_json=None):
         if state_json is None:
             if device_type == "light":
@@ -263,20 +226,23 @@ class DatabaseManager:
         return self.cursor.lastrowid
 
     def get_user_devices(self, user_id):
-        self.cursor.execute("SELECT id, device_id, name, type, room_id, state_json FROM user_devices WHERE user_id = ?", (user_id,))
+        self.cursor.execute("SELECT device_id, name, type, room_id, state_json FROM user_devices WHERE user_id = ?", (user_id,))
         devices = []
         for row in self.cursor.fetchall():
-            state = json.loads(row[5]) if row[5] else {}
-            devices.append({"id": row[1], "name": row[2], "type": row[3], "roomId": row[4], **state})
+            state = json.loads(row["state_json"]) if row["state_json"] else {}
+            devices.append({"id": row["device_id"], "name": row["name"], "type": row["type"], "roomId": row["room_id"], **state})
         return devices
 
-    def update_user_device(self, user_id, device_id, updates):
-        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-        values = list(updates.values()) + [user_id, device_id]
-        if "state_json" in updates:
-            set_clause = "state_json = ?"
-            values = [updates["state_json"], user_id, device_id]
-        self.cursor.execute(f"UPDATE user_devices SET {set_clause} WHERE user_id = ? AND device_id = ?", values)
+    def get_user_device_by_id(self, user_id, device_id):
+        self.cursor.execute("SELECT type, state_json FROM user_devices WHERE user_id = ? AND device_id = ?", (user_id, device_id))
+        row = self.cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_user_device_state(self, user_id, device_id, new_state_json):
+        self.cursor.execute(
+            "UPDATE user_devices SET state_json = ? WHERE user_id = ? AND device_id = ?",
+            (new_state_json, user_id, device_id)
+        )
         self.conn.commit()
         return self.cursor.rowcount > 0
 
@@ -285,6 +251,9 @@ class DatabaseManager:
         self.conn.commit()
         return self.cursor.rowcount > 0
 
+    # ==========================================
+    # QUẢN LÝ PHÒNG (ROOMS)
+    # ==========================================
     def add_user_room(self, user_id, room_id, name):
         self.cursor.execute("INSERT INTO user_rooms (user_id, room_id, name) VALUES (?, ?, ?)", (user_id, room_id, name))
         self.conn.commit()
@@ -292,19 +261,28 @@ class DatabaseManager:
 
     def get_user_rooms(self, user_id):
         self.cursor.execute("SELECT room_id, name FROM user_rooms WHERE user_id = ?", (user_id,))
-        rooms = [{"id": row[0], "name": row[1]} for row in self.cursor.fetchall()]
-        if not rooms:
+        rows = self.cursor.fetchall()
+        if not rows:
             default_rooms = [("LIVING", "Phòng khách"), ("BED", "Phòng ngủ"), ("KITCHEN", "Nhà bếp"), ("GARDEN", "Sân vườn")]
             for room_id, name in default_rooms:
                 self.add_user_room(user_id, room_id, name)
-            return self.get_user_rooms(user_id)
-        return rooms
+            # Fetch lại sau khi tạo
+            self.cursor.execute("SELECT room_id, name FROM user_rooms WHERE user_id = ?", (user_id,))
+            rows = self.cursor.fetchall()
+        return [{"id": row["room_id"], "name": row["name"]} for row in rows]
 
-    def delete_user_room(self, user_id, room_id):
+    def delete_room_cascade(self, user_id, room_id):
+        """Xóa phòng sẽ xóa luôn thiết bị và preset trong phòng đó"""
+        self.cursor.execute("DELETE FROM user_devices WHERE user_id = ? AND room_id = ?", (user_id, room_id))
+        self.cursor.execute("DELETE FROM user_presets WHERE user_id = ? AND room_id = ?", (user_id, room_id))
         self.cursor.execute("DELETE FROM user_rooms WHERE user_id = ? AND room_id = ?", (user_id, room_id))
+        deleted = self.cursor.rowcount > 0
         self.conn.commit()
-        return self.cursor.rowcount > 0
+        return deleted
 
+    # ==========================================
+    # PRESETS
+    # ==========================================
     def add_user_preset(self, user_id, preset_id, name, icon, room_id=None, device_configs_json=None):
         if device_configs_json is None:
             device_configs_json = "{}"
@@ -319,8 +297,8 @@ class DatabaseManager:
         self.cursor.execute("SELECT preset_id, name, icon, room_id, device_configs_json FROM user_presets WHERE user_id = ?", (user_id,))
         presets = []
         for row in self.cursor.fetchall():
-            configs = json.loads(row[4]) if row[4] else {}
-            presets.append({"id": row[0], "name": row[1], "icon": row[2], "roomId": row[3], "deviceConfigs": configs})
+            configs = json.loads(row["device_configs_json"]) if row["device_configs_json"] else {}
+            presets.append({"id": row["preset_id"], "name": row["name"], "icon": row["icon"], "roomId": row["room_id"], "deviceConfigs": configs})
         return presets
 
     def update_user_preset(self, user_id, preset_id, name=None, icon=None, room_id=None, device_configs_json=None):
@@ -343,179 +321,56 @@ class DatabaseManager:
         self.conn.commit()
         return self.cursor.rowcount > 0
 
+    # ==========================================
+    # CÁC HÀM GET CHUYÊN DỤNG CHO API (MỚI THÊM)
+    # ==========================================
+    def get_latest_environment(self):
+        self.cursor.execute("SELECT value, timestamp FROM sensor_logs WHERE sensor_id='TEMP' ORDER BY timestamp DESC LIMIT 1")
+        temp = self.cursor.fetchone()
+        self.cursor.execute("SELECT value, timestamp FROM sensor_logs WHERE sensor_id='LIGHT' ORDER BY timestamp DESC LIMIT 1")
+        light = self.cursor.fetchone()
+        return {"temperature": dict(temp) if temp else None, "light": dict(light) if light else None}
 
-if __name__ == "__main__":
+    def get_all_devices_status(self):
+        query = """
+            SELECT d.device_id, d.description, 
+                   COALESCE((SELECT status FROM device_logs 
+                             WHERE device_id = d.device_id 
+                             ORDER BY timestamp DESC LIMIT 1), 0) as status
+            FROM devices d 
+            WHERE d.device_id NOT LIKE 'SET_%'
+        """
+        self.cursor.execute(query)
+        return [dict(row) for row in self.cursor.fetchall()]
 
-    # print("=" * 50)
-    # print(" SMART HOME DATABASE INITIALIZATION ")
-    # print("=" * 50)
+    def get_camera_logs(self, limit):
+        self.cursor.execute("SELECT * FROM camera_logs ORDER BY timestamp DESC LIMIT ?", (limit,))
+        return [dict(row) for row in self.cursor.fetchall()]
 
-    # # ============================
-    # # CREATE DB MANAGER
-    # # ============================
+    def get_sensor_logs(self, sensor_id, limit):
+        if sensor_id:
+            self.cursor.execute("SELECT * FROM sensor_logs WHERE sensor_id=? ORDER BY timestamp DESC LIMIT ?", (sensor_id, limit))
+        else:
+            self.cursor.execute("SELECT * FROM sensor_logs ORDER BY timestamp DESC LIMIT ?", (limit,))
+        return [dict(row) for row in self.cursor.fetchall()]
 
-    db = DatabaseManager("smart_home.db")
+    def get_snapshot_status(self):
+        def latest(sensor_id):
+            self.cursor.execute("SELECT value FROM sensor_logs WHERE sensor_id=? ORDER BY timestamp DESC LIMIT 1", (sensor_id,))
+            r = self.cursor.fetchone()
+            return r["value"] if r else None
 
-    # print("[OK] DatabaseManager initialized")
+        temp = latest("TEMP")
+        light = latest("LIGHT")
+        pir = latest("PIR")
 
-    # # ============================
-    # # RUN MIGRATIONS
-    # # ============================
+        self.cursor.execute("SELECT has_human FROM camera_logs ORDER BY timestamp DESC LIMIT 1")
+        cam = self.cursor.fetchone()
+        human = bool(cam["has_human"]) if cam else False
 
-    # print("\n[INFO] Running migrations...")
-
-    # db.migrate_database()
-    # print("[OK] Migration completed")
-
-    # # ============================
-    # # CREATE TEST USER
-    # # ============================
-
-    # print("\n[INFO] Creating test user...")
-
-    # result = db.create_user(
-    #     username="account1",
-    #     password="123456789"
-    # )
-
-    # if result["success"]:
-    #     print(f"[OK] User created with ID: {result['user_id']}")
-
-    #     user_id = result["user_id"]
-
-    # else:
-
-    #     print(f"[INFO] {result['message']}")
-
-    #     user = db.get_user("account1")
-
-    #     user_id = user["id"]
-
-    #     print(f"[OK] Existing user ID: {user_id}")
-
-    # # ============================
-    # # INIT DEFAULT ROOMS
-    # # ============================
-
-    # print("\n[INFO] Initializing rooms...")
-
-    # rooms = db.get_user_rooms(user_id)
-
-    # for room in rooms:
-    #     print(f"   -> {room['id']} : {room['name']}")
-
-    # # ============================
-    # # ADD SAMPLE DEVICES
-    # # ============================
-
-    # print("\n[INFO] Adding sample devices...")
-
-    # db.add_user_device(
-    #     user_id=user_id,
-    #     device_id="LED_001",
-    #     name="Living Room LED",
-    #     device_type="light",
-    #     room_id="LIVING"
-    # )
-
-    # db.add_user_device(
-    #     user_id=user_id,
-    #     device_id="FAN_001",
-    #     name="Bedroom Fan",
-    #     device_type="fan",
-    #     room_id="BED"
-    # )
-
-    # print("[OK] Sample devices added")
-
-    # # ============================
-    # # CREATE SAMPLE PRESET
-    # # ============================
-
-    # print("\n[INFO] Creating sample preset...")
-
-    # sample_config = {
-    #     "LED_001": {
-    #         "isOn": True,
-    #         "brightness": 80
-    #     },
-    #     "FAN_001": {
-    #         "isOn": True,
-    #         "speed": 3
-    #     }
-    # }
-
-    # db.add_user_preset(
-    #     user_id=user_id,
-    #     preset_id="PRESET_SLEEP",
-    #     name="Sleep Mode",
-    #     icon="moon",
-    #     room_id="BED",
-    #     device_configs_json=json.dumps(sample_config)
-    # )
-
-    # print("[OK] Sample preset created")
-
-    # # ============================
-    # # INSERT SAMPLE LOGS
-    # # ============================
-
-    # print("\n[INFO] Inserting sample logs...")
-
-    # db.log_sensor(
-    #     sensor_id="TEMP",
-    #     value=28.5,
-    #     user_name="account"
-    # )
-
-    # db.log_sensor(
-    #     sensor_id="LIGHT",
-    #     value=300,
-    #     user_name="account"
-    # )
-
-    # db.log_device(
-    #     device_id="LED",
-    #     status=1,
-    #     trigger_source="Motion detected",
-    #     threshold=0.8
-    # )
-
-    # db.log_device(
-    #     device_id="FAN",
-    #     status=1,
-    #     trigger_source="Temperature high",
-    #     threshold=30
-    # )
-
-    # print("[OK] Sample logs inserted")
-
-    # # ============================
-    # # SHOW DATA
-    # # ============================
-
-    # print("\n[INFO] Fetching user devices...")
-
-    # devices = db.get_user_devices(user_id)
-
-    # for device in devices:
-    #     print(device)
-
-    # print("\n[INFO] Fetching presets...")
-
-    # presets = db.get_user_presets(user_id)
-
-    # for preset in presets:
-    #     print(preset)
-
-    # # ============================
-    # # DONE
-    # # ============================
-
-    # print("\n" + "=" * 50)
-    # print(" DATABASE READY SUCCESSFULLY ")
-    # print("=" * 50)
-    result = db.create_user(
-        username="account",
-        password="123456789"
-    )
+        return {
+            "temperature": float(temp) if temp is not None else 0.0,
+            "light": int(light) if light is not None else 0,
+            "pir": bool(pir) if pir is not None else False,
+            "human_detect": human
+        }

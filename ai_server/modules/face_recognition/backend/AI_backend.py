@@ -584,28 +584,65 @@ async def register_ws(websocket: WebSocket):
         await websocket.close()
 
 # ===============================
-# SERVER REGISTER API
+# SERVER REGISTER API 
 # ===============================
 
 from pydantic import BaseModel
+from typing import List
 
+# Tạo model con để hứng dữ liệu camera lẻ
+class CameraInfo(BaseModel):
+    camera_id: str
+    room: str
 
 class ServerRegisterRequest(BaseModel):
-
     cam_server_id: str
     location: str
     url: str
-
+    cameras: List[CameraInfo] = []  # Nhận danh sách camera từ Worker
 
 @app.post("/register_server")
-def register_server(
-    request: ServerRegisterRequest
-):
-
+def register_server(request: ServerRegisterRequest):
+    # 1. Lưu thông tin Server gốc
     result = camera_account_db.register_camera_server(
         cam_server_id=request.cam_server_id,
         location=request.location,
         url=request.url
     )
+    
+    # Kết nối DB dùng chung
+    from database.db_manager import DatabaseManager
+    db_manager = DatabaseManager("smart_home.db")
+    
+    try:
+        # 2. Quét mảng cameras và lưu vào Database Trung Tâm
+        for cam in request.cameras:
+            db_manager.cursor.execute(
+                "INSERT OR REPLACE INTO cameras (camera_id, location) VALUES (?, ?)",
+                (cam.camera_id, f"{request.cam_server_id} - {cam.room}")
+            )
+
+        # 3. [BẢN UPDATE]: Tự động cấp quyền cho toàn bộ User CŨ
+        # Lấy danh sách ID của tất cả user đang có trong hệ thống
+        db_manager.cursor.execute("SELECT id FROM users")
+        existing_users = db_manager.cursor.fetchall()
+
+        # Quét từng user và link họ với cái Server vừa online này
+        for user in existing_users:
+            user_id = user["id"]  # Vì db_manager dùng sqlite3.Row
+            db_manager.cursor.execute(
+                """
+                INSERT OR IGNORE INTO user_servers (user_id, cam_server_id) 
+                VALUES (?, ?)
+                """,
+                (user_id, request.cam_server_id)
+            )
+            
+        # Lưu toàn bộ thay đổi
+        db_manager.conn.commit()
+
+    except Exception as e:
+        print(f"[DB ERROR] Quá trình lưu data cho Server bị lỗi: {e}")
+        db_manager.conn.rollback() # Hoàn tác nếu có lỗi để tránh rác DB
 
     return result

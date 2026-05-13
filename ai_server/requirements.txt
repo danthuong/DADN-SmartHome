@@ -5,11 +5,10 @@ uvicorn
 PyJWT
 passlib
 bcrypt==3.2.2
-# onnxruntime
-# # insightface 
-# opencv-python
-# numpy
-# deep-sort-realtime
+
+opencv-python
+numpy
+deep-sort-realtime
 
 fastapi
 uvicorn
@@ -31,8 +30,8 @@ werkzeug
 python-dotenv
 requests
 
-# PyTorch CUDA 12.1
-# --index-url https://download.pytorch.org/whl/cu121
-# torch
-# torchvision
-# torchaudio
+insightface
+
+onnxruntime-gpu
+
+pinecone
