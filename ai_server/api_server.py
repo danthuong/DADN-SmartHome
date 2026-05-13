@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-import sqlite3
+from typing import Any, Optional, Dict
 import jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -24,6 +25,8 @@ mqtt.start()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("HS256")
+SECRET_KEY = os.getenv("SECRET_KEY", "your_super_secret_key_here")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 # ==========================================
 # 3. KHỞI TẠO FASTAPI SERVER
@@ -38,8 +41,7 @@ app = FastAPI(
 # 4. MODELS (Khuôn mẫu dữ liệu)
 # ==========================================
 class UserRegister(BaseModel):
-    user_id: str
-    user_name: str
+    username: str
     password: str
 
 class UserLogin(BaseModel):
@@ -50,135 +52,208 @@ class DeviceControl(BaseModel):
     status: int  # 1 (Bật) hoặc 0 (Tắt)
     trigger_source: str = "Manual_App"
 
+class RoomCreate(BaseModel):
+    roomId: str
+    name: str
+
+class PresetCreate(BaseModel):
+    id: str
+    icon: str
+    roomId: Optional[str] = None
+    deviceConfigs: Dict[str, Any] = {}
+
+class PresetUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+    roomId: Optional[str] = None
+    deviceConfigs: Optional[Dict[str, Any]] = None
+
 # ==========================================
-# 5. HÀM HỖ TRỢ KẾT NỐI DATABASE
+# 5. JWT DEPENDENCY
 # ==========================================
-def get_db_connection():
-    conn = sqlite3.connect("smart_home.db", check_same_thread=False)
-    conn.row_factory = sqlite3.Row 
-    return conn
+security = HTTPBearer()
+
+def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> int:
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Token không hợp lệ")
+        return int(user_id)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token đã hết hạn")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Token không hợp lệ")
 
 # ==========================================
 # NHÓM 1: XÁC THỰC TÀI KHOẢN (AUTH)
 # ==========================================
 @app.post("/api/auth/register", tags=["Authentication"])
 def register_user(user: UserRegister):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM accounts WHERE user_id=? OR user_name=?", (user.user_id, user.user_name))
-    if cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="User ID hoặc Username đã tồn tại!")
-    
-    hashed_password = pwd_context.hash(user.password)
-    cursor.execute("INSERT INTO accounts (user_id, user_name, password) VALUES (?, ?, ?)",
-                   (user.user_id, user.user_name, hashed_password))
-    conn.commit()
-    conn.close()
-    return {"message": f"Đăng ký thành công tài khoản: {user.user_name}"}
+    result = db.create_user(user.username, user.password)
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+
+    user_id = result["user_id"]
+    expire_time = datetime.utcnow() + timedelta(days=7)
+    token_data = {"sub": str(user_id), "name": user.username, "exp": expire_time}
+    access_token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+    return {"token": access_token, "user_id": user_id, "username": user.username}
 
 @app.post("/api/auth/login", tags=["Authentication"])
 def login_user(user: UserLogin):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM accounts WHERE user_name=?", (user.user_name,))
-    db_user = cursor.fetchone()
-    conn.close()
+    db_user = db.get_user(user.username)
 
-    if not db_user or not pwd_context.verify(user.password, db_user["password"]):
+    if not db_user or not db.verify_password(db_user["password"], user.password):
         raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu!")
 
     expire_time = datetime.utcnow() + timedelta(days=7)
-    token_data = {"sub": db_user["user_id"], "name": db_user["user_name"], "exp": expire_time}
+    token_data = {"sub": str(db_user["id"]), "name": db_user["username"], "exp": expire_time}
     access_token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"token": access_token, "user_id": db_user["id"], "username": db_user["username"]}
 
 # ==========================================
 # NHÓM 2: GIÁM SÁT THIẾT BỊ & MÔI TRƯỜNG
 # ==========================================
 @app.get("/api/status/environment", tags=["Live Status"])
 def get_current_environment():
-    """Lấy thông số Nhiệt độ và Ánh sáng mới nhất từ database"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT value, timestamp FROM sensor_logs WHERE sensor_id='TEMP' ORDER BY timestamp DESC LIMIT 1")
-    temp = cursor.fetchone()
-    cursor.execute("SELECT value, timestamp FROM sensor_logs WHERE sensor_id='LIGHT' ORDER BY timestamp DESC LIMIT 1")
-    light = cursor.fetchone()
-    conn.close()
-    return {"temperature": dict(temp) if temp else None, "light": dict(light) if light else None}
-### UPDATE API CHO LOAD DANH SÁCH THIẾT BỊ (CÓ KÈM ID của thiết bị)
-# Hiện có LED và FAN, sau này có thể có LED1 LED2 FAN1 FAN2 ....
+    return db.get_latest_environment()
+
 @app.get("/api/status/devices", tags=["Live Status"])
 def list_all_devices_status():
-    """Lấy danh sách tất cả thiết bị thực tế kèm trạng thái mới nhất (Né các SET_)"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    query = """
-        SELECT d.device_id, d.description, 
-               COALESCE((SELECT status FROM device_logs 
-                         WHERE device_id = d.device_id 
-                         ORDER BY timestamp DESC LIMIT 1), 0) as status
-        FROM devices d 
-        WHERE d.device_id NOT LIKE 'SET_%'
-    """
-    cursor.execute(query)
-    devices = cursor.fetchall()
-    conn.close()
-    return {"data": [dict(row) for row in devices]}
+    return {"data": db.get_all_devices_status()}
 
 # ==========================================
-# NHÓM 3: ĐIỀU KHIỂN THIẾT BỊ ĐỘNG (MQTT)
+# NHÓM 3: ĐIỀU KHIỂN USER DEVICE (cập nhật state_json + MQTT)
 # ==========================================
 @app.post("/api/devices/{device_id}/control", tags=["Control"])
-def control_device(device_id: str, command: DeviceControl):
-    """Gửi lệnh điều khiển thiết bị thông qua giao thức MQTT"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def control_device(
+    device_id: str,
+    command: DeviceControl,
+    user_id: int = Depends(get_current_user_id),
+):
+    row = db.get_user_device_by_id(user_id, device_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Thiết bị '{device_id}' không tồn tại")
 
-    # 1. Kiểm tra thiết bị có tồn tại trong danh mục không
-    cursor.execute("SELECT device_id FROM devices WHERE device_id = ? AND device_id NOT LIKE 'SET_%'", (device_id,))
-    if not cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"Thiết bị '{device_id}' không hợp lệ!")
+    device_type = row["type"]
+    state = json.loads(row["state_json"]) if row["state_json"] else {}
+    state[command.command] = command.value
+    new_state_json = json.dumps(state)
 
-    try:
-        # 2. Publish lệnh qua MQTT (Ví dụ: device-fan, device-led)
-        feed_name = f"device-{device_id.lower()}"
-        mqtt.publish(feed_name, command.status)
+    db.update_user_device_state(user_id, device_id, new_state_json)
 
-        # 3. Lưu lịch sử thao tác từ App vào Database
-        cursor.execute(
-            "INSERT INTO device_logs (device_id, status, trigger_source) VALUES (?, ?, ?)",
-            (device_id, command.status, command.trigger_source)
-        )
-        conn.commit()
-        conn.close()
-        return {"message": f"Đã gửi lệnh {command.status} tới {device_id} thành công!"}
-    except Exception as e:
-        conn.close()
-        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
+    print(f"[CONTROL] user={user_id} device={device_id} type={device_type} "
+          f"{command.command}={command.value}")
+
+    if command.command == "isOn":
+        mqtt_value = 1 if command.value else 0
+        try:
+            # giả sử ta quy ước tên feed ứng với 1 thiết bị có id là ABC thì 
+            # tên feed chuẩn là "device-<id_device>" trên ada
+            device_feed_name = f"device-{device_id.lower()}"
+            
+            mqtt.publish(device_feed_name, mqtt_value)
+            db.log_device(device_id, mqtt_value, f"App_User_{user_id}")
+        except Exception as e:
+            print(f"[CONTROL] MQTT publish error: {e}")
+
+    return {"success": True, "message": f"Đã cập nhật {command.command}={command.value}"}
 
 # ==========================================
 # NHÓM 4: TRUY XUẤT NHẬT KÝ (LOGS)
 # ==========================================
 @app.get("/api/logs/cameras", tags=["Logs Dashboard"])
 def get_camera_logs(limit: int = 10):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM camera_logs ORDER BY timestamp DESC LIMIT ?", (limit,))
-    logs = cursor.fetchall()
-    conn.close()
-    return {"data": [dict(row) for row in logs]}
+    return {"data": db.get_camera_logs(limit)}
 
 @app.get("/api/logs/sensors", tags=["Logs Dashboard"])
 def get_sensor_logs(sensor_id: str = None, limit: int = 20):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    if sensor_id:
-        cursor.execute("SELECT * FROM sensor_logs WHERE sensor_id=? ORDER BY timestamp DESC LIMIT ?", (sensor_id, limit))
-    else:
-        cursor.execute("SELECT * FROM sensor_logs ORDER BY timestamp DESC LIMIT ?", (limit,))
-    logs = cursor.fetchall()
-    conn.close()
-    return {"data": [dict(row) for row in logs]}
+    return {"data": db.get_sensor_logs(sensor_id, limit)}
+
+# ==========================================
+# NHÓM 7: USER DEVICES (CRUD)
+# ==========================================
+@app.get("/api/devices", tags=["User Devices"])
+def list_user_devices(user_id: int = Depends(get_current_user_id)):
+    return {"devices": db.get_user_devices(user_id)}
+
+@app.post("/api/devices", tags=["User Devices"])
+def create_user_device(req: DeviceCreate, user_id: int = Depends(get_current_user_id)):
+    #device_id = uuid.uuid4().hex
+    # Lấy trực tiếp ID do bên Mobile tự custom
+    db.add_user_device(user_id, req.device_id, req.name, req.type, req.roomId)
+    return {"success": True, "device_id": req.device_id}
+
+@app.delete("/api/devices/{device_id}", tags=["User Devices"])
+def delete_user_device_endpoint(device_id: str, user_id: int = Depends(get_current_user_id)):
+    deleted = db.delete_user_device(user_id, device_id)
+    return {"success": deleted}
+
+# ==========================================
+# NHÓM 8: USER ROOMS
+# ==========================================
+@app.get("/api/rooms", tags=["User Rooms"])
+def list_user_rooms(user_id: int = Depends(get_current_user_id)):
+    return {"rooms": db.get_user_rooms(user_id)}
+
+@app.post("/api/rooms", tags=["User Rooms"])
+def create_user_room(req: RoomCreate, user_id: int = Depends(get_current_user_id)):
+    db.add_user_room(user_id, req.roomId, req.name)
+    return {"success": True}
+
+@app.delete("/api/rooms/{room_id}", tags=["User Rooms"])
+def delete_user_room_endpoint(room_id: str, user_id: int = Depends(get_current_user_id)):
+    deleted = db.delete_room_cascade(user_id, room_id)
+    return {"success": deleted}
+
+# ==========================================
+# NHÓM 9: USER AVATAR
+# ==========================================
+@app.post("/api/users/avatar", tags=["User"])
+def update_avatar(req: AvatarUpdate, user_id: int = Depends(get_current_user_id)):
+    updated = db.update_user_avatar(user_id, req.avatar)
+    return {"success": updated, "avatar": req.avatar if updated else None}
+
+@app.get("/api/users/avatar", tags=["User"])
+def get_avatar(user_id: int = Depends(get_current_user_id)):
+    avatar = db.get_user_avatar(user_id)
+    return {"success": avatar is not None, "avatar": avatar}
+
+# ==========================================
+# NHÓM 10: USER PRESETS
+# ==========================================
+@app.get("/api/presets", tags=["User Presets"])
+def list_presets(user_id: int = Depends(get_current_user_id)):
+    return {"presets": db.get_user_presets(user_id)}
+
+@app.post("/api/presets", tags=["User Presets"])
+def create_preset(req: PresetCreate, user_id: int = Depends(get_current_user_id)):
+    db.add_user_preset(user_id, req.id, req.name, req.icon, req.roomId, json.dumps(req.deviceConfigs))
+    return {"success": True}
+
+@app.put("/api/presets/{preset_id}", tags=["User Presets"])
+def update_preset_endpoint(preset_id: str, req: PresetUpdate, user_id: int = Depends(get_current_user_id)):
+    updated = db.update_user_preset(
+        user_id, preset_id, 
+        name=req.name, icon=req.icon, room_id=req.roomId, 
+        device_configs_json=json.dumps(req.deviceConfigs) if req.deviceConfigs else None
+    )
+    return {"success": updated}
+
+@app.delete("/api/presets/{preset_id}", tags=["User Presets"])
+def delete_preset_endpoint(preset_id: str, user_id: int = Depends(get_current_user_id)):
+    deleted = db.delete_user_preset(user_id, preset_id)
+    return {"success": deleted}
+
+# ==========================================
+# NHÓM 11: SNAPSHOT STATUS (cho mobile)
+# ==========================================
+@app.get("/api/status", tags=["Live Status"])
+def get_status_snapshot(user_id: int = Depends(get_current_user_id)):
+    return db.get_snapshot_status()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
