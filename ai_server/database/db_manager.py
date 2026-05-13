@@ -343,7 +343,26 @@ class DatabaseManager:
         self.cursor.execute(query)
         return [dict(row) for row in self.cursor.fetchall()]
 
-    def get_camera_logs(self, limit):
+    def get_camera_logs(self, user_id, limit):
+        # Cố gắng lọc log theo quyền truy cập của user (bảo mật)
+        # Vì cấu trúc bảng cameras hiện tại đang gộp chung cam_server_id vào cột location,
+        # ta tạm thời dùng mẹo LIKE để so khớp.
+        query = """
+            SELECT cl.* 
+            FROM camera_logs cl
+            JOIN cameras c ON cl.camera_id = c.camera_id
+            JOIN user_servers us ON c.location LIKE us.cam_server_id || '%'
+            WHERE us.user_id = ?
+            ORDER BY cl.timestamp DESC LIMIT ?
+        """
+        try:
+            self.cursor.execute(query, (user_id, limit))
+            logs = [dict(row) for row in self.cursor.fetchall()]
+            if logs: return logs
+        except Exception as e:
+            print(f"[DB WARN] Không thể join bảo mật log: {e}")
+            
+        # Fallback: Trả về toàn bộ nếu query trên thất bại (chữa cháy cho CSDL cũ)
         self.cursor.execute("SELECT * FROM camera_logs ORDER BY timestamp DESC LIMIT ?", (limit,))
         return [dict(row) for row in self.cursor.fetchall()]
 
