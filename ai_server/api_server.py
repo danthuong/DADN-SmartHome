@@ -21,15 +21,13 @@ mqtt.start()
 
 # TẠO INSTANCE DUY NHẤT CỦA DATABASE (CÓ RLOCK)
 from database.db_manager import DatabaseManager
-_db_init = DatabaseManager("smart_home.db")
-_db_init.migrate_database()
-print("[API SERVER] DB initialized — tables ready.")
+db = DatabaseManager("smart_home.db")
+print("[API SERVER] DB initialized — tables ready & Lock engaged.")
 
 # =========================================
 # 2. CẤU HÌNH BẢO MẬT & JWT TOKEN
 # ==========================================
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY", "your_super_secret_key_here")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 # ==========================================
@@ -103,20 +101,12 @@ def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(secu
 # ==========================================
 @app.post("/api/auth/register", tags=["Authentication"])
 def register_user(user: UserRegister):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username=?", (user.username,))
-    if cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="Username đã tồn tại!")
-    
-    hashed_password = pwd_context.hash(user.password)
-    cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)",
-                   (user.username, hashed_password))
-    conn.commit()
-    user_id = cursor.lastrowid
-    conn.close()
+    result = db.create_user(user.username, user.password)
 
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+
+    user_id = result["user_id"]
     expire_time = datetime.utcnow() + timedelta(days=7)
     token_data = {"sub": str(user_id), "name": user.username, "exp": expire_time}
     access_token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
@@ -124,13 +114,9 @@ def register_user(user: UserRegister):
 
 @app.post("/api/auth/login", tags=["Authentication"])
 def login_user(user: UserLogin):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username=?", (user.username,))
-    db_user = cursor.fetchone()
-    conn.close()
+    db_user = db.get_user(user.username)
 
-    if not db_user or not pwd_context.verify(user.password, db_user["password"]):
+    if not db_user or not db.verify_password(db_user["password"], user.password):
         raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu!")
 
     expire_time = datetime.utcnow() + timedelta(days=7)
