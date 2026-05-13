@@ -55,6 +55,7 @@ class DeviceControl(BaseModel):
     value: Any = None
 
 class DeviceCreate(BaseModel):
+    device_id: str # thêm dòng để Mobile biết
     name: str
     type: str
     roomId: str
@@ -161,12 +162,12 @@ def control_device(
     if command.command == "isOn":
         mqtt_value = 1 if command.value else 0
         try:
-            if device_type == "light":
-                mqtt.publish("device-led", mqtt_value)
-                db.log_device("LED", mqtt_value, f"App_User_{user_id}")
-            elif device_type == "fan":
-                mqtt.publish("device-fan", mqtt_value)
-                db.log_device("FAN", mqtt_value, f"App_User_{user_id}")
+            # giả sử ta quy ước tên feed ứng với 1 thiết bị có id là ABC thì 
+            # tên feed chuẩn là "device-<id_device>" trên ada
+            device_feed_name = f"device-{device_id.lower()}"
+            
+            mqtt.publish(device_feed_name, mqtt_value)
+            db.log_device(device_id, mqtt_value, f"App_User_{user_id}")
         except Exception as e:
             print(f"[CONTROL] MQTT publish error: {e}")
 
@@ -176,17 +177,12 @@ def control_device(
 # NHÓM 4: TRUY XUẤT NHẬT KÝ (LOGS)
 # ==========================================
 @app.get("/api/logs/cameras", tags=["Logs Dashboard"])
-def get_camera_logs(limit: int = 10, user_id: int = Depends(get_current_user_id)):
-    return {"data": db.get_camera_logs(user_id, limit)}
+def get_camera_logs(limit: int = 10):
+    return {"data": db.get_camera_logs(limit)}
 
 @app.get("/api/logs/sensors", tags=["Logs Dashboard"])
 def get_sensor_logs(sensor_id: str = None, limit: int = 20):
     return {"data": db.get_sensor_logs(sensor_id, limit)}
-
-@app.get("/api/users/me", tags=["User"])
-def get_current_user_info(user_id: int = Depends(get_current_user_id)):
-    """API giúp lấy ra user_id hiện tại từ Token (Hỗ trợ cho phần Face Recognition của AI)"""
-    return {"success": True, "user_id": user_id}
 
 # ==========================================
 # NHÓM 7: USER DEVICES (CRUD)
@@ -197,9 +193,10 @@ def list_user_devices(user_id: int = Depends(get_current_user_id)):
 
 @app.post("/api/devices", tags=["User Devices"])
 def create_user_device(req: DeviceCreate, user_id: int = Depends(get_current_user_id)):
-    device_id = uuid.uuid4().hex
-    db.add_user_device(user_id, device_id, req.name, req.type, req.roomId)
-    return {"success": True, "device_id": device_id}
+    #device_id = uuid.uuid4().hex
+    # Lấy trực tiếp ID do bên Mobile tự custom
+    db.add_user_device(user_id, req.device_id, req.name, req.type, req.roomId)
+    return {"success": True, "device_id": req.device_id}
 
 @app.delete("/api/devices/{device_id}", tags=["User Devices"])
 def delete_user_device_endpoint(device_id: str, user_id: int = Depends(get_current_user_id)):
