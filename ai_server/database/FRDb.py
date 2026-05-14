@@ -17,13 +17,20 @@ from modules.face_recognition.config.config import HybridConfig
 
 load_dotenv()
 
+MAX_FACE_PER_NAME = 10
+
 
 # ==========================================
 # INFO
 # ==========================================
 
 class Info:
-    def __init__(self, name=None, cam_server_id=None):
+
+    def __init__(
+        self,
+        name=None,
+        cam_server_id=None
+    ):
         self.name = name
         self.cam_server_id = cam_server_id
 
@@ -39,7 +46,12 @@ class FRDb(ABC):
         pass
 
     @abstractmethod
-    def updateEmbedding(self, info: Info, embedding, img):
+    def updateEmbedding(
+        self,
+        info: Info,
+        embedding,
+        img
+    ):
         pass
 
 
@@ -88,6 +100,27 @@ class SQLiteFaceDB:
         self.conn.commit()
 
     # ======================================
+    # UPDATE FACE IMAGE PATH
+    # ======================================
+
+    def update_face(
+        self,
+        face_id,
+        img_path
+    ):
+
+        self.cursor.execute("""
+            UPDATE faces
+            SET img_path=?
+            WHERE id=?
+        """, (
+            img_path,
+            face_id
+        ))
+
+        self.conn.commit()
+
+    # ======================================
     # SEARCH FACE IDS
     # ======================================
 
@@ -96,7 +129,8 @@ class SQLiteFaceDB:
         query = """
             SELECT
                 id,
-                name
+                name,
+                img_path
             FROM faces
             WHERE 1=1
         """
@@ -116,9 +150,69 @@ class SQLiteFaceDB:
             tuple(params)
         )
 
-        rows = self.cursor.fetchall()
+        return self.cursor.fetchall()
 
-        return rows
+    # ======================================
+    # COUNT FACE
+    # ======================================
+
+    def count_faces(self, info: Info):
+
+        query = """
+            SELECT COUNT(*)
+            FROM faces
+            WHERE 1=1
+        """
+
+        params = []
+
+        if info.name is not None:
+            query += " AND name=?"
+            params.append(info.name)
+
+        if info.cam_server_id is not None:
+            query += " AND cam_server_id=?"
+            params.append(info.cam_server_id)
+
+        self.cursor.execute(
+            query,
+            tuple(params)
+        )
+
+        return self.cursor.fetchone()[0]
+
+    # ======================================
+    # GET OLDEST FACE
+    # ======================================
+
+    def get_oldest_face(self, info: Info):
+
+        query = """
+            SELECT
+                id,
+                img_path
+            FROM faces
+            WHERE 1=1
+        """
+
+        params = []
+
+        if info.name is not None:
+            query += " AND name=?"
+            params.append(info.name)
+
+        if info.cam_server_id is not None:
+            query += " AND cam_server_id=?"
+            params.append(info.cam_server_id)
+
+        query += " ORDER BY rowid ASC LIMIT 1"
+
+        self.cursor.execute(
+            query,
+            tuple(params)
+        )
+
+        return self.cursor.fetchone()
 
 
 # ==========================================
@@ -150,7 +244,7 @@ class PineconeFaceDB:
         )
 
     # ======================================
-    # INSERT VECTOR
+    # UPSERT VECTOR
     # ======================================
 
     def upsert_embedding(
@@ -160,7 +254,10 @@ class PineconeFaceDB:
         metadata
     ):
 
-        if isinstance(embedding, np.ndarray):
+        if isinstance(
+            embedding,
+            np.ndarray
+        ):
             embedding = embedding.tolist()
 
         self.index.upsert(
@@ -174,7 +271,7 @@ class PineconeFaceDB:
         )
 
     # ======================================
-    # GET VECTOR BY ID
+    # GET VECTOR
     # ======================================
 
     def get_embedding(self, face_id):
@@ -206,7 +303,10 @@ class PineconeFaceDB:
         cam_server_id=None
     ):
 
-        if isinstance(embedding, np.ndarray):
+        if isinstance(
+            embedding,
+            np.ndarray
+        ):
             embedding = embedding.tolist()
 
         kwargs = {
@@ -215,7 +315,6 @@ class PineconeFaceDB:
             "include_metadata": True
         }
 
-        # FILTER
         if cam_server_id is not None:
 
             kwargs["filter"] = {
@@ -228,6 +327,16 @@ class PineconeFaceDB:
             **kwargs
         )
 
+    # ======================================
+    # DELETE VECTOR
+    # ======================================
+
+    def delete_embedding(self, face_id):
+
+        self.index.delete(
+            ids=[face_id]
+        )
+
 
 # ==========================================
 # HYBRID FACE DB
@@ -235,7 +344,10 @@ class PineconeFaceDB:
 
 class HybridFaceDB(FRDb):
 
-    def __init__(self, config: HybridConfig):
+    def __init__(
+        self,
+        config: HybridConfig
+    ):
 
         # SQLITE
         sqlite_path = os.path.join(
@@ -265,8 +377,6 @@ class HybridFaceDB(FRDb):
 
     # ======================================
     # GET EMBEDDINGS
-    # SQLITE -> IDS
-    # PINECONE -> EMBEDDINGS
     # ======================================
 
     def getEmbedding(self, info: Info):
@@ -277,7 +387,7 @@ class HybridFaceDB(FRDb):
 
         results = []
 
-        for face_id, name in rows:
+        for face_id, name, _ in rows:
 
             embedding = self.vector.get_embedding(
                 face_id
@@ -296,11 +406,7 @@ class HybridFaceDB(FRDb):
         return results
 
     # ======================================
-    # INSERT FACE
-    # ======================================
-
-    # ======================================
-    # INSERT OR UPDATE FACE
+    # INSERT / OVERWRITE FACE
     # ======================================
 
     def updateEmbedding(
@@ -309,32 +415,33 @@ class HybridFaceDB(FRDb):
         embedding,
         img
     ):
-        # 1. KIỂM TRA XEM USER ĐÃ TỒN TẠI CHƯA
-        # Hàm search_faces sẽ tìm theo name và cam_server_id có trong biến info
-        existing_faces = self.sql.search_faces(info)
-        
-        is_new_user = len(existing_faces) == 0
 
-        if is_new_user:
-            # Nếu chưa tồn tại -> Tạo UUID mới
-            face_id = str(uuid.uuid4())
-        else:
-            # Nếu đã tồn tại -> Lấy lại ID cũ để tiến hành ghi đè
-            face_id = existing_faces[0][0] # existing_faces trả về list các tuple (id, name)
-
-        # 2. LƯU ẢNH (Nếu ID cũ thì nó sẽ tự động ghi đè file ảnh cũ)
-        img_path = os.path.join(
-            self.image_dir,
-            f"{face_id}.jpg"
+        face_count = self.sql.count_faces(
+            info
         )
 
-        cv2.imwrite(
-            img_path,
-            img
-        )
+        # ==================================
+        # CASE 1:
+        # INSERT NEW FACE
+        # ==================================
 
-        # 3. LƯU VÀO SQLITE (Chỉ INSERT nếu là user mới)
-        if is_new_user:
+        if face_count < MAX_FACE_PER_NAME:
+
+            face_id = str(
+                uuid.uuid4()
+            )
+
+            img_path = os.path.join(
+                self.image_dir,
+                f"{face_id}.jpg"
+            )
+
+            cv2.imwrite(
+                img_path,
+                img
+            )
+
+            # SQLITE
             self.sql.insert_face(
                 face_id=face_id,
                 name=info.name,
@@ -342,10 +449,57 @@ class HybridFaceDB(FRDb):
                 img_path=img_path
             )
 
-        # 4. LƯU VÀO PINECONE
-        # Hàm upsert của Pinecone hoạt động như sau:
-        # - Nếu face_id chưa có -> Thêm vector mới
-        # - Nếu face_id đã có -> Ghi đè vector cũ bằng vector mới (cập nhật khuôn mặt)
+            # PINECONE
+            self.vector.upsert_embedding(
+                face_id=face_id,
+                embedding=embedding,
+                metadata={
+                    "name": info.name,
+                    "cam_server_id": info.cam_server_id
+                }
+            )
+
+            return face_id
+
+        # ==================================
+        # CASE 2:
+        # OVERWRITE OLDEST FACE
+        # ==================================
+
+        oldest_face = self.sql.get_oldest_face(
+            info
+        )
+
+        if oldest_face is None:
+            return None
+
+        face_id, old_img_path = oldest_face
+
+        # DELETE OLD IMAGE
+        if (
+            old_img_path is not None and
+            os.path.exists(old_img_path)
+        ):
+            os.remove(old_img_path)
+
+        # SAVE NEW IMAGE
+        new_img_path = os.path.join(
+            self.image_dir,
+            f"{face_id}.jpg"
+        )
+
+        cv2.imwrite(
+            new_img_path,
+            img
+        )
+
+        # UPDATE SQLITE
+        self.sql.update_face(
+            face_id=face_id,
+            img_path=new_img_path
+        )
+
+        # UPDATE PINECONE
         self.vector.upsert_embedding(
             face_id=face_id,
             embedding=embedding,
@@ -358,7 +512,7 @@ class HybridFaceDB(FRDb):
         return face_id
 
     # ======================================
-    # DIRECT SEARCH
+    # SEARCH FACE
     # ======================================
 
     def search_face(

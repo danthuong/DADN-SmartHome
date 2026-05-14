@@ -43,8 +43,8 @@ class RegisterRequest(BaseModel):
 # Camera Worker
 # ==============================
 DISPLAY_LOCAL = False   # bật/tắt hiển thị màn hình local
-# mqtt = SmartHomeMQTT()
-# mqtt.start()
+mqtt = SmartHomeMQTT()
+mqtt.start()
 
 
 import threading
@@ -225,7 +225,11 @@ def camera_worker(camera_id, camera_url, cam_server_id, location, room):
             # =========================
             # MQTT
             # =========================
-            print(f"[MQTT] host_counter={host_counter}, state={state}")
+            if state != last_state_mqtt:
+                print(f"[MQTT] host_counter={host_counter}, state={state}")
+                mqtt.publish("host-detect", state)
+                last_state_mqtt = state
+
 
             # ======================
             # DRAW TRACKS

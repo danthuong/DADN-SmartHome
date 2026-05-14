@@ -5,6 +5,7 @@ import tkinter as tk
 import websocket
 import json
 import time
+import base64
 
 from tkinter import messagebox, simpledialog
 
@@ -48,6 +49,10 @@ def login(username, password):
         return False
 
 
+# =====================
+# GET CAMERAS
+# =====================
+
 def get_cameras():
 
     global cameras
@@ -55,11 +60,16 @@ def get_cameras():
     try:
         response = requests.get(f"{BACKEND_URL}/cameras")
         response.raise_for_status()
+
         cameras = response.json()["cameras"]
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
+
+# =====================
+# GROUP CAMERA
+# =====================
 
 def group_by_location():
 
@@ -67,8 +77,13 @@ def group_by_location():
     locations = {}
 
     for cam in cameras:
+
         loc = cam["location"]
-        locations.setdefault(loc, []).append(cam)
+
+        if loc not in locations:
+            locations[loc] = []
+
+        locations[loc].append(cam)
 
 
 # =====================
@@ -84,11 +99,16 @@ def stream_camera(url):
         return
 
     while True:
+
         ret, frame = cap.read()
+
         if not ret:
             break
 
-        cv2.imshow("Camera Stream (press q to exit)", frame)
+        cv2.imshow(
+            "Camera Stream (press q to exit)",
+            frame
+        )
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
@@ -100,6 +120,7 @@ def stream_camera(url):
 def start_stream():
 
     room = room_var.get()
+
     if room == "":
         return
 
@@ -113,7 +134,7 @@ def start_stream():
 
 
 # =====================
-# WEBSOCKET REGISTER (AUTO LOOP)
+# WEBSOCKET REGISTER
 # =====================
 
 def register_face_ws(frame, name, cam_server_id):
@@ -126,30 +147,45 @@ def register_face_ws(frame, name, cam_server_id):
 
         while True:
 
+            # Encode frame -> jpg
             ok, buffer = cv2.imencode(".jpg", frame)
+
             if not ok:
                 continue
 
+            # Convert bytes -> base64 string
+            img_base64 = base64.b64encode(
+                buffer.tobytes()
+            ).decode("utf-8")
+
             payload = {
-                "file": list(buffer.tobytes()),
+                "file": img_base64,
                 "name": name,
                 "cam_server_id": cam_server_id
             }
 
             ws.send(json.dumps(payload))
-            result = json.loads(ws.recv())
+
+            response = ws.recv()
+
+            result = json.loads(response)
+
+            print("WS RESPONSE:", result)
 
             msg = result.get("message", "")
-            print("WS:", msg)
 
             if msg == "success":
+
                 ws.close()
+
                 return result
 
             time.sleep(0.2)
 
     except Exception as e:
+
         ws.close()
+
         raise e
 
 
@@ -162,10 +198,18 @@ def register_face():
     cam_server_id = server_var.get()
 
     if cam_server_id == "":
-        messagebox.showerror("Error", "Select camera server first")
+
+        messagebox.showerror(
+            "Error",
+            "Select camera server first"
+        )
+
         return
 
-    name = simpledialog.askstring("Register Face", "Enter name")
+    name = simpledialog.askstring(
+        "Register Face",
+        "Enter name"
+    )
 
     if not name:
         return
@@ -173,7 +217,12 @@ def register_face():
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
-        messagebox.showerror("Error", "Cannot open webcam")
+
+        messagebox.showerror(
+            "Error",
+            "Cannot open webcam"
+        )
+
         return
 
     messagebox.showinfo(
@@ -186,12 +235,20 @@ def register_face():
         while True:
 
             ret, frame = cap.read()
+
             if not ret:
                 break
 
-            cv2.imshow("Register Face (AUTO WS)", frame)
+            cv2.imshow(
+                "Register Face (AUTO WS)",
+                frame
+            )
 
-            result = register_face_ws(frame, name, cam_server_id)
+            result = register_face_ws(
+                frame,
+                name,
+                cam_server_id
+            )
 
             if result and result.get("message") == "success":
 
@@ -199,13 +256,18 @@ def register_face():
                     "Success",
                     "Register face successful"
                 )
+
                 break
 
             if cv2.waitKey(1) & 0xFF == 27:
                 break
 
     except Exception as e:
-        messagebox.showerror("Error", str(e))
+
+        messagebox.showerror(
+            "Error",
+            str(e)
+        )
 
     cap.release()
     cv2.destroyAllWindows()
@@ -222,30 +284,46 @@ def handle_login():
 
     if login(username, password):
 
+        # SERVER DROPDOWN
         server_menu["menu"].delete(0, "end")
 
         for sid in cam_servers.keys():
+
             server_menu["menu"].add_command(
                 label=sid,
                 command=lambda v=sid: server_var.set(v)
             )
 
-        server_var.set(list(cam_servers.keys())[0])
+        server_var.set(
+            list(cam_servers.keys())[0]
+        )
 
+        # CAMERA
         get_cameras()
+
+        # GROUP
         group_by_location()
 
+        # LOCATION DROPDOWN
         location_menu["menu"].delete(0, "end")
 
         for loc in locations.keys():
+
             location_menu["menu"].add_command(
                 label=loc,
                 command=lambda v=loc: location_var.set(v)
             )
 
-        location_var.set(list(locations.keys())[0])
+        location_var.set(
+            list(locations.keys())[0]
+        )
+
         update_rooms()
 
+
+# =====================
+# UPDATE ROOM
+# =====================
 
 def update_rooms():
 
@@ -254,11 +332,13 @@ def update_rooms():
     room_menu["menu"].delete(0, "end")
 
     global room_map
+
     room_map = {}
 
     for cam in locations[loc]:
 
         name = cam["room"]
+
         room_map[name] = cam
 
         room_menu["menu"].add_command(
@@ -266,22 +346,40 @@ def update_rooms():
             command=lambda v=name: room_var.set(v)
         )
 
-    room_var.set(list(room_map.keys())[0])
+    room_var.set(
+        list(room_map.keys())[0]
+    )
 
 
 # =====================
-# UI (FIXED LOGIN UI FULL)
+# UI
 # =====================
 
 root = tk.Tk()
+
 root.title("SmartHome Camera Demo")
+
 root.geometry("450x500")
+
 root.configure(bg="#1e1e2f")
 
-FONT_TITLE = ("Segoe UI", 16, "bold")
+FONT_TITLE = (
+    "Segoe UI",
+    16,
+    "bold"
+)
 
-main_frame = tk.Frame(root, bg="#2b2b3c", padx=20, pady=20)
-main_frame.pack(fill="both", expand=True)
+main_frame = tk.Frame(
+    root,
+    bg="#2b2b3c",
+    padx=20,
+    pady=20
+)
+
+main_frame.pack(
+    fill="both",
+    expand=True
+)
 
 tk.Label(
     main_frame,
@@ -291,22 +389,63 @@ tk.Label(
     bg="#2b2b3c"
 ).pack(pady=10)
 
+
 # =====================
-# LOGIN UI (RESTORED)
+# LOGIN UI
 # =====================
 
-login_frame = tk.Frame(main_frame, bg="#2b2b3c")
-login_frame.pack(fill="x", pady=10)
+login_frame = tk.Frame(
+    main_frame,
+    bg="#2b2b3c"
+)
 
-tk.Label(login_frame, text="Username", fg="white", bg="#2b2b3c").grid(row=0, column=0, sticky="w")
+login_frame.pack(
+    fill="x",
+    pady=10
+)
+
+tk.Label(
+    login_frame,
+    text="Username",
+    fg="white",
+    bg="#2b2b3c"
+).grid(
+    row=0,
+    column=0,
+    sticky="w"
+)
 
 username_entry = tk.Entry(login_frame)
-username_entry.grid(row=0, column=1, padx=10, pady=5)
 
-tk.Label(login_frame, text="Password", fg="white", bg="#2b2b3c").grid(row=1, column=0, sticky="w")
+username_entry.grid(
+    row=0,
+    column=1,
+    padx=10,
+    pady=5
+)
 
-password_entry = tk.Entry(login_frame, show="*")
-password_entry.grid(row=1, column=1, padx=10, pady=5)
+tk.Label(
+    login_frame,
+    text="Password",
+    fg="white",
+    bg="#2b2b3c"
+).grid(
+    row=1,
+    column=0,
+    sticky="w"
+)
+
+password_entry = tk.Entry(
+    login_frame,
+    show="*"
+)
+
+password_entry.grid(
+    row=1,
+    column=1,
+    padx=10,
+    pady=5
+)
 
 tk.Button(
     login_frame,
@@ -314,23 +453,54 @@ tk.Button(
     command=handle_login,
     bg="#4CAF50",
     fg="white"
-).grid(row=2, columnspan=2, pady=10)
+).grid(
+    row=2,
+    columnspan=2,
+    pady=10
+)
+
 
 # =====================
-# DROPDOWNS
+# DROPDOWN
 # =====================
 
 server_var = tk.StringVar()
 location_var = tk.StringVar()
 room_var = tk.StringVar()
 
-server_menu = tk.OptionMenu(main_frame, server_var, "")
-location_menu = tk.OptionMenu(main_frame, location_var, "")
-room_menu = tk.OptionMenu(main_frame, room_var, "")
+server_menu = tk.OptionMenu(
+    main_frame,
+    server_var,
+    ""
+)
 
-server_menu.pack(fill="x", pady=5)
-location_menu.pack(fill="x", pady=5)
-room_menu.pack(fill="x", pady=5)
+location_menu = tk.OptionMenu(
+    main_frame,
+    location_var,
+    ""
+)
+
+room_menu = tk.OptionMenu(
+    main_frame,
+    room_var,
+    ""
+)
+
+server_menu.pack(
+    fill="x",
+    pady=5
+)
+
+location_menu.pack(
+    fill="x",
+    pady=5
+)
+
+room_menu.pack(
+    fill="x",
+    pady=5
+)
+
 
 # =====================
 # BUTTONS
@@ -340,14 +510,31 @@ tk.Button(
     main_frame,
     text="Open Camera",
     command=start_stream,
-    bg="#2196F3"
+    bg="#2196F3",
+    fg="white"
 ).pack(pady=10)
 
 tk.Button(
     main_frame,
     text="Register Face (AUTO WS)",
     command=register_face,
-    bg="#FF9800"
+    bg="#FF9800",
+    fg="white"
 ).pack()
+
+
+# =====================
+# LOCATION CHANGE EVENT
+# =====================
+
+location_var.trace_add(
+    "write",
+    lambda *args: update_rooms()
+)
+
+
+# =====================
+# MAIN LOOP
+# =====================
 
 root.mainloop()
