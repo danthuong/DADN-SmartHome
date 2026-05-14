@@ -164,14 +164,22 @@ def control_device(
     # Đóng gói lại
     packed_data = ""
     if device_type == "fan":
-        is_on = 1 if state.get("isOn") else 0
-        speed = int(state.get("speed", 50)) # speed thì từ 0 - 100 (%) nên để mặc định 0 cho tắt
-        is_osc = 1 if state.get("isOscillating") else 0
-        is_track = 1 if state.get("isTracking") else 0
+        def to_bool(val):
+            if isinstance(val, bool): return val
+            return str(val).lower() in ("true", "1", "yes")
+
+        is_on = 1 if to_bool(state.get("isOn")) else 0
+        speed = int(state.get("speed", 0))
+        is_osc = 1 if to_bool(state.get("isOscillating")) else 0
+        is_track = 1 if to_bool(state.get("isTracking")) else 0
         # ép speed có 3 chữ số (ví dụ 36 là thành 036)
         packed_data = f"{is_on}:{speed:03d}:{is_osc}:{is_track}"
     elif device_type == "light":
-        is_on = 1 if state.get("isOn") else 0
+        def to_bool(val):
+            if isinstance(val, bool): return val
+            return str(val).lower() in ("true", "1", "yes")
+        
+        is_on = 1 if to_bool(state.get("isOn")) else 0
         brightness = int(state.get("brightness", 50))
         # Lấy giá trị màu (Int) từ Kotlin, này ko rành, tra gg thì bảo 1 số đại diện rồi mask ra lấy r g b hả ?
         color = int(state.get("color", -1))
