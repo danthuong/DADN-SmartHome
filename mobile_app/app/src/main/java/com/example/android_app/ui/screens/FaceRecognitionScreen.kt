@@ -94,7 +94,7 @@ fun FaceRecognitionScreen(strings: AppStrings, loggedInUsername: String, onBack:
             kotlinx.coroutines.withContext(Dispatchers.IO) {
                 try {
                     val client = OkHttpClient()
-                    val url = "http://100.126.85.58:8000/cameras?account=$loggedInUsername"
+                    val url = "http://100.76.112.54:8000/cameras?account=$loggedInUsername"
 
                     val request = Request.Builder().url(url).build()
                     val response = client.newCall(request).execute()

@@ -188,7 +188,7 @@ class DatabaseManager:
             self.conn.commit()
             return {"success": True, "user_id": user_id}
         except sqlite3.IntegrityError:
-            return {"success": False, "message": "Username already exists"}
+            return {"success": False, "message": "Tên đăng nhập này đã tồn tại!"}
 
     def get_user(self, username):
         self.cursor.execute("SELECT id, username, password, avatar FROM users WHERE username = ?", (username,))

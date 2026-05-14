@@ -119,7 +119,14 @@ fun AppNavigation(
     val initialDestination = if (savedUsername != null) "dashboard" else "login"
 
     // Create User object from saved username (no password needed since we're using token auth)
-    var currentUser by remember { mutableStateOf<User?>(savedUsername?.let { User(0, it) }) }
+    var currentUser by remember { 
+        mutableStateOf<User?>(
+            savedUsername?.let { username ->
+                val fullName = sharedPref.getString("fullname_$username", "") ?: ""
+                User(0, username, fullName = fullName) 
+            }
+        ) 
+    }
 
     androidx.navigation.compose.NavHost(
         navController = navController,
@@ -129,9 +136,12 @@ fun AppNavigation(
             LoginScreen(
                 strings = strings,
                 onLoginSuccess = { userObj : User ->
-                    SmartHomeRepository.loadUserData(userObj.username, strings)
-                    currentUser = userObj
-                    sharedPref.edit().putString("saved_username", userObj.username).apply()
+                    val fullName = sharedPref.getString("fullname_${userObj.username}", "") ?: ""
+                    val finalUser = userObj.copy(fullName = fullName)
+                    
+                    SmartHomeRepository.loadUserData(finalUser.username, strings)
+                    currentUser = finalUser
+                    sharedPref.edit().putString("saved_username", finalUser.username).apply()
 
                     navController.navigate("dashboard") {
                         popUpTo("login") { inclusive = true }

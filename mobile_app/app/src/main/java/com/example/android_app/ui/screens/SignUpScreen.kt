@@ -127,7 +127,12 @@ fun SignUpScreen(
                                         // Save token to memory and SharedPrefs
                                         SmartHomeRepository.setToken(response.token)
                                         SmartHomeRepository.saveToken(response.token, context)
-                                        onSignUpSuccess(User(response.user_id, response.username))
+                                        
+                                        // Save full name locally
+                                        val prefs = context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE)
+                                        prefs.edit().putString("fullname_${response.username}", name).apply()
+                                        
+                                        onSignUpSuccess(User(response.user_id, response.username, fullName = name))
                                     },
                                     onFailure = { exception ->
                                         errorMessage = exception.message ?: "Registration failed"

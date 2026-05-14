@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.GlobalScope
+import org.json.JSONObject
 import java.util.UUID
 
 object SmartHomeRepository {
@@ -299,15 +300,25 @@ object SmartHomeRepository {
 
     private fun revertToSnapshot() {
         val history = deviceHistorySnapshot ?: return
+        val currentDevices = _devices.value
+        
         _devices.update { current ->
             current.map { history[it.id] ?: it }
         }
+        
+        _devices.value.forEach { newDevice ->
+            val oldDevice = currentDevices.find { it.id == newDevice.id }
+            syncDeviceChanges(oldDevice, newDevice)
+        }
+        
         deviceHistorySnapshot = null
     }
 
     private fun applyPresetLogic(presetId: String) {
         val preset = _presets.value.find { it.id == presetId } ?: return
         println("DEBUG: applyPresetLogic - preset: ${preset.name}, deviceConfigs: ${preset.deviceConfigs.size}")
+        
+        val oldDevices = _devices.value
         
         _devices.update { current ->
             current.map { device ->
@@ -331,6 +342,31 @@ object SmartHomeRepository {
                         else -> device
                     }
                 }
+            }
+        }
+        
+        val newDevices = _devices.value
+        newDevices.forEach { newDevice ->
+            val oldDevice = oldDevices.find { it.id == newDevice.id }
+            syncDeviceChanges(oldDevice, newDevice)
+        }
+    }
+
+    private fun syncDeviceChanges(oldDevice: SmartDevice?, newDevice: SmartDevice) {
+        if (oldDevice == null || oldDevice == newDevice) return
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            if (oldDevice is SmartLight && newDevice is SmartLight) {
+                if (oldDevice.isOn != newDevice.isOn) controlDevice(newDevice.id, "isOn", newDevice.isOn)
+                // If backend supports brightness/color, uncomment these:
+                // if (oldDevice.brightness != newDevice.brightness) controlDevice(newDevice.id, "setBrightness", newDevice.brightness.toInt())
+                // if (oldDevice.color != newDevice.color) controlDevice(newDevice.id, "setColor", newDevice.color)
+            }
+            if (oldDevice is SmartFan && newDevice is SmartFan) {
+                if (oldDevice.isOn != newDevice.isOn) controlDevice(newDevice.id, "isOn", newDevice.isOn)
+                if (oldDevice.speed != newDevice.speed) controlDevice(newDevice.id, "setSpeed", newDevice.speed.toInt())
+                if (oldDevice.isOscillating != newDevice.isOscillating) controlDevice(newDevice.id, "setOscillation", newDevice.isOscillating)
+                if (oldDevice.isTracking != newDevice.isTracking) controlDevice(newDevice.id, "setTracking", newDevice.isTracking)
             }
         }
     }
@@ -457,8 +493,20 @@ object SmartHomeRepository {
                 val response = ApiClient.apiService.login(LoginRequest(username, password))
                 authToken = "Bearer ${response.token}"
                 Result.success(response)
+            } catch (e: retrofit2.HttpException) {
+                var errorMsg = "Đăng nhập thất bại (Lỗi máy chủ)"
+                try {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    if (errorBody != null) {
+                        val jsonObject = JSONObject(errorBody)
+                        if (jsonObject.has("detail")) {
+                            errorMsg = jsonObject.getString("detail")
+                        }
+                    }
+                } catch (ex: Exception) { }
+                Result.failure(Exception(errorMsg))
             } catch (e: Exception) {
-                Result.failure(e)
+                Result.failure(Exception("Lỗi kết nối: ${e.message}"))
             }
         }
     }
@@ -469,8 +517,20 @@ object SmartHomeRepository {
                 val response = ApiClient.apiService.register(RegisterRequest(username, password))
                 authToken = "Bearer ${response.token}"
                 Result.success(response)
+            } catch (e: retrofit2.HttpException) {
+                var errorMsg = "Đăng ký thất bại (Lỗi máy chủ)"
+                try {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    if (errorBody != null) {
+                        val jsonObject = JSONObject(errorBody)
+                        if (jsonObject.has("detail")) {
+                            errorMsg = jsonObject.getString("detail")
+                        }
+                    }
+                } catch (ex: Exception) { }
+                Result.failure(Exception(errorMsg))
             } catch (e: Exception) {
-                Result.failure(e)
+                Result.failure(Exception("Lỗi kết nối: ${e.message}"))
             }
         }
     }
