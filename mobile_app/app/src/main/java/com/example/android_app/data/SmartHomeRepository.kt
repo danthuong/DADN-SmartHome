@@ -359,14 +359,14 @@ object SmartHomeRepository {
             if (oldDevice is SmartLight && newDevice is SmartLight) {
                 if (oldDevice.isOn != newDevice.isOn) controlDevice(newDevice.id, "isOn", newDevice.isOn)
                 // If backend supports brightness/color, uncomment these:
-                // if (oldDevice.brightness != newDevice.brightness) controlDevice(newDevice.id, "setBrightness", newDevice.brightness.toInt())
-                // if (oldDevice.color != newDevice.color) controlDevice(newDevice.id, "setColor", newDevice.color)
+                // if (oldDevice.brightness != newDevice.brightness) controlDevice(newDevice.id, "brightness", newDevice.brightness.toInt())
+                // if (oldDevice.color != newDevice.color) controlDevice(newDevice.id, "color", newDevice.color)
             }
             if (oldDevice is SmartFan && newDevice is SmartFan) {
                 if (oldDevice.isOn != newDevice.isOn) controlDevice(newDevice.id, "isOn", newDevice.isOn)
-                if (oldDevice.speed != newDevice.speed) controlDevice(newDevice.id, "setSpeed", newDevice.speed.toInt())
-                if (oldDevice.isOscillating != newDevice.isOscillating) controlDevice(newDevice.id, "setOscillation", newDevice.isOscillating)
-                if (oldDevice.isTracking != newDevice.isTracking) controlDevice(newDevice.id, "setTracking", newDevice.isTracking)
+                if (oldDevice.speed != newDevice.speed) controlDevice(newDevice.id, "speed", newDevice.speed.toInt())
+                if (oldDevice.isOscillating != newDevice.isOscillating) controlDevice(newDevice.id, "isOscillating", newDevice.isOscillating)
+                if (oldDevice.isTracking != newDevice.isTracking) controlDevice(newDevice.id, "isTracking", newDevice.isTracking)
             }
         }
     }
@@ -431,7 +431,7 @@ object SmartHomeRepository {
         }
         if (speed != null) {
             GlobalScope.launch {
-                val result = controlDevice(id, "setSpeed", speed.toInt())
+                val result = controlDevice(id, "speed", speed.toInt())
                 result.onFailure { e ->
                     println("ERROR: Failed to sync fan speed - ${e.message}")
                 }
@@ -439,7 +439,7 @@ object SmartHomeRepository {
         }
         if (isOscillating != null) {
             GlobalScope.launch {
-                val result = controlDevice(id, "setOscillation", isOscillating)
+                val result = controlDevice(id, "isOscillating", isOscillating)
                 result.onFailure { e ->
                     println("ERROR: Failed to sync fan oscillation - ${e.message}")
                 }
@@ -447,7 +447,7 @@ object SmartHomeRepository {
         }
         if (isTracking != null) {
             GlobalScope.launch {
-                val result = controlDevice(id, "setTracking", isTracking)
+                val result = controlDevice(id, "isTracking", isTracking)
                 result.onFailure { e ->
                     println("ERROR: Failed to sync fan tracking - ${e.message}")
                 }

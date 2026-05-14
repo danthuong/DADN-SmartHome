@@ -151,27 +151,55 @@ def control_device(
 
     device_type = row["type"]
     state = json.loads(row["state_json"]) if row["state_json"] else {}
+    
+    # Vì Mobile đã gửi đúng key (ví dụ: speed, brightness), ta lưu thẳng vào DB luôn
     state[command.command] = command.value
-    new_state_json = json.dumps(state)
+    db.update_user_device_state(user_id, device_id, json.dumps(state))
+    # THỐNG NHẤT TÊN FEED LIÊN QUAN DEVICE SẼ NHƯ SAU
+    # device-<ID của device>
+    # Dạng thông tin gửi đi sẽ là isOn:speed:isOsc:isTracking
+    # Tức là nén thông tin của 1 device quạt lại, này bên Yolo sẽ dùng quy luật để parse lấy thoogn tin từng cái
+    # với led sẽ có isOn:brightness:r:g:b
+    
+    # Đóng gói lại
+    packed_data = ""
+    if device_type == "fan":
+        is_on = 1 if state.get("isOn") else 0
+        speed = int(state.get("speed", 50)) # speed thì từ 0 - 100 (%) nên để mặc định 0 cho tắt
+        is_osc = 1 if state.get("isOscillating") else 0
+        is_track = 1 if state.get("isTracking") else 0
+        # ép speed có 3 chữ số (ví dụ 36 là thành 036)
+        packed_data = f"{is_on}:{speed:03d}:{is_osc}:{is_track}"
+    elif device_type == "light":
+        is_on = 1 if state.get("isOn") else 0
+        brightness = int(state.get("brightness", 50))
+        # Lấy giá trị màu (Int) từ Kotlin, này ko rành, tra gg thì bảo 1 số đại diện rồi mask ra lấy r g b hả ?
+        color = int(state.get("color", -1))
+        # Mổ xẻ màu Int thành 3 số thập phân R, G, B
+        # Mask 0xFFFFFF để bỏ qua phần Alpha (độ trong suốt)
+        rgb = color & 0xFFFFFF 
+        r = (rgb >> 16) & 0xFF
+        g = (rgb >> 8) & 0xFF
+        b = rgb & 0xFF
+        # Dùng :03d để ép luôn thành 3 chữ số (50 thành 050)
+        packed_data = f"{is_on}:{brightness:03d}:{r:03d}:{g:03d}:{b:03d}"
+    else: pass # chỗ này để mở rộng sau này, nếu mình có thêm loajit device khác
+    
+    device_feed_name = f"device-{device_id.lower()}"
 
-    db.update_user_device_state(user_id, device_id, new_state_json)
+    # Xử lí bắn MQTT lên cloud Ada
+    try:
+        mqtt.publish(device_feed_name, packed_data)
 
-    print(f"[CONTROL] user={user_id} device={device_id} type={device_type} "
-          f"{command.command}={command.value}")
-
-    if command.command == "isOn":
-        mqtt_value = 1 if command.value else 0
-        try:
-            # giả sử ta quy ước tên feed ứng với 1 thiết bị có id là ABC thì 
-            # tên feed chuẩn là "device-<id_device>" trên ada
-            device_feed_name = f"device-{device_id.lower()}"
-            
-            mqtt.publish(device_feed_name, mqtt_value)
+        if command.command == "isOn":
+            mqtt_value = 1 if command.value else 0
             db.log_device(device_id, mqtt_value, f"App_User_{user_id}")
-        except Exception as e:
-            print(f"[CONTROL] MQTT publish error: {e}")
+        
+        print(f"[CONTROL] Đã gửi chuỗi '{packed_data}' lên feed '{device_feed_name}'")
+    except Exception as e:
+        print(f"[CONTROL] MQTT Error: {e}")
 
-    return {"success": True, "message": f"Đã cập nhật {command.command}={command.value}"}
+    return {"success": True, "message": f"Executed {command.command}"}
 
 # ==========================================
 # NHÓM 4: TRUY XUẤT NHẬT KÝ (LOGS)

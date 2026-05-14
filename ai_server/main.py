@@ -46,9 +46,7 @@ def connected(client):
     print("[MQTT] Kết nối thành công tới Adafruit IO ...")
     client.subscribe("human-detect-pir") 
     client.subscribe("env-temp") 
-    client.subscribe("env-light")   
-    client.subscribe("setting-temp")  
-    client.subscribe("setting-light") 
+    client.subscribe("env-light")
 
 def disconnected(client):
     print("[MQTT] Đã ngắt kết nối ... ")
@@ -70,12 +68,6 @@ def message(client, feed_id, payload):
         elif feed_id == "env-light":
             current_light = val
             db.log_sensor("LIGHT", val)
-        elif feed_id == "setting-temp":
-            threshold_temp = val
-            print(f"[SETTING] Ngưỡng nhiệt độ mới: {val}")
-        elif feed_id == "setting-light":
-            threshold_light = val
-            print(f"[SETTING] Ngưỡng ánh sáng mới: {val}")
     except Exception as e:
         print(f"Lỗi nhận tin: {e}")
 
