@@ -376,7 +376,7 @@ object SmartHomeRepository {
     fun syncLightToServer(id: String, isOn: Boolean? = null, brightness: Float? = null, color: Int? = null) {
         if (isOn != null) {
             GlobalScope.launch {
-                val result = controlDevice(id, "toggle", isOn)
+                val result = controlDevice(id, "isOn", isOn)
                 result.onFailure { e ->
                     println("ERROR: Failed to sync light toggle - ${e.message}")
                 }
@@ -387,7 +387,7 @@ object SmartHomeRepository {
     fun syncFanToServer(id: String, isOn: Boolean? = null, speed: Float? = null, isOscillating: Boolean? = null, isTracking: Boolean? = null) {
         if (isOn != null) {
             GlobalScope.launch {
-                val result = controlDevice(id, "toggle", isOn)
+                val result = controlDevice(id, "isOn", isOn)
                 result.onFailure { e ->
                     println("ERROR: Failed to sync fan toggle - ${e.message}")
                 }

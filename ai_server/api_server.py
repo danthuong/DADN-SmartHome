@@ -267,4 +267,4 @@ def get_status_snapshot(user_id: int = Depends(get_current_user_id)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
