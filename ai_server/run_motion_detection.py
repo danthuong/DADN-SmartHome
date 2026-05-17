@@ -44,6 +44,8 @@ class PersonState:
         self.current_continuous_gesture = "none" 
         self.gesture_start_time = 0
         self.dynamic_buffer = collections.deque(maxlen=30) 
+        # --- Bổ sung tránh spam gesture 2 lần liên tục---
+        self.is_gesture_locked = False
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -80,9 +82,12 @@ def main():
     global_ui_gesture = "NONE"
     global_ui_color = (200, 200, 200)
     global_ui_timer = 0
-    
+    # Biến cho logic Tracking
+    global_active_controller_id = None
+    last_published_angle = -1
+
     HOLD_TIME = 1.5
-    TOGGLE_COOLDOWN = 1.5
+    TOGGLE_COOLDOWN = 5
     CONFIRM_HOLD_TIME = 1.0
 
     global_cmd_cooldowns = {}
@@ -110,6 +115,9 @@ def main():
             print(f"[{time.strftime('%H:%M:%S')}] Có người? -> {current_human_state}")
             mqtt.publish("human-detect-ai", current_human_state)
             last_human_state = current_human_state
+            # Nếu không có ai trong khung hình, reset người đang điều khiển
+            if current_human_state == 0:
+                global_active_controller_id = None
         # ==========================================
 
         timestamp_ms = int(now * 1000)
@@ -184,6 +192,9 @@ def main():
                     mqtt.publish("gesture-log", cmd) 
                     global_cmd_cooldowns[cmd] = now
                     
+                    # CẤP QUYỀN ĐIỀU KHIỂN CHO NGƯỜI NÀY
+                    global_active_controller_id = track_id
+
                     user.override_timer = now + HOLD_TIME
                     global_ui_gesture = f"ID:{track_id} {cmd}"
                     global_ui_color = (0, 255, 255)
@@ -214,8 +225,9 @@ def main():
                         if user.current_continuous_gesture != stable_label:
                             user.current_continuous_gesture = stable_label
                             user.gesture_start_time = now 
+                            user.is_gesture_locked = False
                             
-                        elif now - user.gesture_start_time >= CONFIRM_HOLD_TIME:
+                        elif not user.is_gesture_locked and (now - user.gesture_start_time >= CONFIRM_HOLD_TIME):
                             cmd = None
                             
                             if stable_label == "1-one": cmd = "One"
@@ -226,12 +238,17 @@ def main():
 
                             if cmd and (now - global_cmd_cooldowns.get(cmd, 0) > TOGGLE_COOLDOWN):
                                 # ==========================================
-                                # 5. BẮN LỆNH CỬ CHỈ TĨNH BẰNG SMART MQTT
+                                # BẮN LỆNH CỬ CHỈ TĨNH BẰNG SMART MQTT
                                 # ==========================================
                                 mqtt.publish("gesture-log", cmd)
                                 global_cmd_cooldowns[cmd] = now
                                 
-                                user.current_continuous_gesture = "none"
+                                # CẤP QUYỀN ĐIỀU KHIỂN CHO NGƯỜI NÀY
+                                global_active_controller_id = track_id
+
+                                #user.current_continuous_gesture = "none"
+                                # Không set current_continuous_gesture = "none" nữa, mà Khóa nó lại
+                                user.is_gesture_locked = True
                                 user.gesture_buffer.clear()
                                 
                                 global_ui_gesture = f"ID:{track_id} {cmd}"
@@ -240,17 +257,46 @@ def main():
                                 
                     else:
                         user.current_continuous_gesture = "none"
+                        user.is_gesture_locked = False
                             
                     user.last_gesture_state = raw_prediction
             else:
                 user.gesture_buffer.append("none")
                 user.current_continuous_gesture = "none"
 
+        # ==========================================
+        # LOGIC TÍNH TOÁN GÓC QUAY REAL-TIME (FAN TRACKING)
+        # ==========================================
+        # Chỉ tính góc quay cho người đang giữ quyền điều khiển
+        if global_active_controller_id is not None and global_active_controller_id in persons_bbox:
+            px1, py1, px2, py2 = persons_bbox[global_active_controller_id]
+            # Tính trung điểm tọa độ X của người đó
+            cx = (px1 + px2) / 2
+            
+            # Ánh xạ tọa độ màn hình (0 -> width) sang góc (180 -> 0)
+            # Tùy chiều lắp Servo vật lý mà bạn có thể đổi ngược lại: int((cx / w) * 180)
+            target_angle = int(180 - (cx / w * 180))
+            
+            # Ép giới hạn an toàn vật lý
+            target_angle = max(0, min(180, target_angle))
+            
+            # Chống rung (Debounce): Chỉ gửi nếu góc thay đổi quá 5 độ
+            if abs(target_angle - last_published_angle) > 5:
+                mqtt.publish("device-fan-angle", target_angle)
+                last_published_angle = target_angle
+            
+            # Vẽ góc trực quan lên màn hình
+            cv2.putText(display_frame, f"Tracking: {target_angle} deg", (px1, py2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
         if now > global_ui_timer:
             global_ui_gesture = "NONE"
             global_ui_color = (200, 200, 200)
 
         cv2.putText(display_frame, f"FPS: {int(mp_fps)}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+
+        # Hiển thị ID người đang nắm quyền điều khiển
+        active_txt = f"Active User: {global_active_controller_id if global_active_controller_id else 'None'}"
+        cv2.putText(display_frame, active_txt, (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
         text_to_show = f"Last Cmd: {global_ui_gesture}"
         font = cv2.FONT_HERSHEY_SIMPLEX

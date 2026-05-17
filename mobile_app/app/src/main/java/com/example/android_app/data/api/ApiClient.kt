@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 
 object ApiClient {
     // THAY ĐỔI IP NÀY THEO MÁY CỦA BẠN
-    private const val BASE_URL = "http://100.126.85.58:8001/"
+    private const val BASE_URL = "http://100.76.112.54:8001/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

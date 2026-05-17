@@ -358,9 +358,8 @@ object SmartHomeRepository {
         GlobalScope.launch(Dispatchers.IO) {
             if (oldDevice is SmartLight && newDevice is SmartLight) {
                 if (oldDevice.isOn != newDevice.isOn) controlDevice(newDevice.id, "isOn", newDevice.isOn)
-                // If backend supports brightness/color, uncomment these:
-                // if (oldDevice.brightness != newDevice.brightness) controlDevice(newDevice.id, "brightness", newDevice.brightness.toInt())
-                // if (oldDevice.color != newDevice.color) controlDevice(newDevice.id, "color", newDevice.color)
+                if (oldDevice.brightness != newDevice.brightness) controlDevice(newDevice.id, "brightness", newDevice.brightness.toInt())
+                if (oldDevice.color != newDevice.color) controlDevice(newDevice.id, "color", newDevice.color)
             }
             if (oldDevice is SmartFan && newDevice is SmartFan) {
                 if (oldDevice.isOn != newDevice.isOn) controlDevice(newDevice.id, "isOn", newDevice.isOn)
@@ -415,6 +414,22 @@ object SmartHomeRepository {
                 val result = controlDevice(id, "isOn", isOn)
                 result.onFailure { e ->
                     println("ERROR: Failed to sync light toggle - ${e.message}")
+                }
+            }
+        }
+        if (brightness != null) {
+            GlobalScope.launch {
+                val result = controlDevice(id, "brightness", brightness.toInt())
+                result.onFailure { e ->
+                    println("ERROR: Failed to sync light brightness - ${e.message}")
+                }
+            }
+        }
+        if (color != null) {
+            GlobalScope.launch {
+                val result = controlDevice(id, "color", color)
+                result.onFailure { e ->
+                    println("ERROR: Failed to sync light color - ${e.message}")
                 }
             }
         }

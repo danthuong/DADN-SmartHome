@@ -126,8 +126,8 @@ class DatabaseManager:
         devices = [
             ('FAN', 'Quạt thông gió'), 
             ('LED', 'Đèn chiếu sáng'),
-            ('SET_TEMP', 'Ngưỡng nhiệt độ (App)'),  
-            ('SET_LIGHT', 'Ngưỡng ánh sáng (App)')  
+            # ('SET_TEMP', 'Ngưỡng nhiệt độ (App)'),  
+            # ('SET_LIGHT', 'Ngưỡng ánh sáng (App)')  
         ]
         
         self.cursor.executemany("INSERT OR IGNORE INTO sensors VALUES (?,?)", sensors)
@@ -250,7 +250,21 @@ class DatabaseManager:
         self.cursor.execute("DELETE FROM user_devices WHERE user_id = ? AND device_id = ?", (user_id, device_id))
         self.conn.commit()
         return self.cursor.rowcount > 0
+    # CẬP NHẬT TRẠNG THÁI QUA CỬ CHỈ 
+    def update_shared_device_state(self, device_id, new_state_json):
+        # Không cần user_id, update thẳng cho mọi user có device_id này
+        self.cursor.execute(
+            "UPDATE user_devices SET state_json = ? WHERE device_id = ?",
+            (new_state_json, device_id)
+        )
+        self.conn.commit()
+        return self.cursor.rowcount > 0
 
+    def get_shared_device_state(self, device_id):
+        # Chỉ cần lấy đại 1 dòng của bất kỳ user nào (vì trạng thái các user phải giống nhau)
+        self.cursor.execute("SELECT type, state_json FROM user_devices WHERE device_id = ? LIMIT 1", (device_id,))
+        row = self.cursor.fetchone()
+        return dict(row) if row else None
     # ==========================================
     # QUẢN LÝ PHÒNG (ROOMS)
     # ==========================================
@@ -395,3 +409,4 @@ class DatabaseManager:
             "pir": bool(pir) if pir is not None else False,
             "human_detect": human
         }
+
