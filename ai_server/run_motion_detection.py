@@ -7,7 +7,10 @@ import pandas as pd
 import pickle
 import collections
 import torch
+import yaml
+import math
 from dotenv import load_dotenv
+from utils import compute_servo_angle
 
 load_dotenv()
 
@@ -35,6 +38,19 @@ GESTURE_MODEL_PATH = os.path.join(ROOT_DIR, "modules", "motion_detection", "mode
 MP_MODEL_PATH = os.path.join(ROOT_DIR, "models", "gesture_recognizer.task")
 MOTION_MODEL_PATH = os.path.join(ROOT_DIR, "modules", "motion_detection", "models", "motion_model.pth")
 
+# --- Camera config ---
+with open("cam_config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
+camera_cfg = config["camera1"]
+
+# as mm
+FOCAL_LENGTH = camera_cfg["focal_length"]
+
+SENSOR_WIDTH = camera_cfg["sensor_width"]
+SENSOR_HEIGHT = camera_cfg["sensor_height"]
+
+
 class PersonState:
     def __init__(self):
         self.motion_buffer = collections.deque(maxlen=TARGET_FRAMES)
@@ -51,7 +67,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
     print("[SYSTEM] Đang tải AI Models...")
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     
     yolo_ai = HumanDetector(model_path=YOLO_MODEL_PATH, conf_threshold=0.6)
     mp_ai = HandExtractor(mp_model=MP_MODEL_PATH, max_hands=4) 
@@ -273,12 +289,14 @@ def main():
             # Tính trung điểm tọa độ X của người đó
             cx = (px1 + px2) / 2
             
-            # Ánh xạ tọa độ màn hình (0 -> width) sang góc (180 -> 0)
-            # Tùy chiều lắp Servo vật lý mà bạn có thể đổi ngược lại: int((cx / w) * 180)
-            target_angle = int(180 - (cx / w * 180))
-            
-            # Ép giới hạn an toàn vật lý
-            target_angle = max(0, min(180, target_angle))
+            # Ánh xạ tọa độ màn hình sang góc servo
+        
+            target_angle = compute_servo_angle(
+                cx=cx,
+                frame_width=w,
+                focal_length_mm=FOCAL_LENGTH,
+                sensor_width_mm=SENSOR_WIDTH
+            )
             
             # Chống rung (Debounce): Chỉ gửi nếu góc thay đổi quá 5 độ
             if abs(target_angle - last_published_angle) > 5:

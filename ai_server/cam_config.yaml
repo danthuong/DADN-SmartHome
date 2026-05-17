@@ -1,0 +1,5 @@
+camera1:
+  name: "xiaomi_11T_pro_backcam"
+  focal_length: 5.96
+  sensor_width: 8.4
+  sensor_height: 6.3
