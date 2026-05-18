@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 import android.util.Base64
 
 class FaceWebSocketClient(
-    private val serverIp: String = "100.76.112.54",
+    private val serverIp: String = "100.126.85.58",
     private val onMessage: (String, JSONObject) -> Unit,
     private val onClosed: () -> Unit
 ) {

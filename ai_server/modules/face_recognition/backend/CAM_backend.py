@@ -42,7 +42,7 @@ class RegisterRequest(BaseModel):
 # ==============================
 # Camera Worker
 # ==============================
-DISPLAY_LOCAL = False   # bật/tắt hiển thị màn hình local
+DISPLAY_LOCAL = True   # bật/tắt hiển thị màn hình local
 mqtt = SmartHomeMQTT()
 mqtt.start()
 

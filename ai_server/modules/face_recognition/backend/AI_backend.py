@@ -339,7 +339,7 @@ async def detect(
 
             best_name = "Unknown"
 
-            if best_score > 0.6:
+            if best_score > 0.5:
                 best_name = db_names[best_idx]
 
         else:
@@ -511,6 +511,11 @@ async def register_ws(websocket: WebSocket):
             frame_bytes = base64.b64decode(base64_str)
             np_arr = np.frombuffer(frame_bytes, np.uint8)
             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+            frame = cv2.rotate(
+                frame,
+                cv2.ROTATE_90_COUNTERCLOCKWISE
+            )
 
             if frame is None:
                 await websocket.send_json({"message": "invalid_frame"})
