@@ -35,7 +35,7 @@ def compute_servo_angle(
     angle_deg = math.degrees(camera_angle_rad)
 
     # 5. Cấp vào hệ tọa độ servo (Giả sử dx dương -> quay sang phải -> góc servo giảm)
-    servo_angle = servo_center_angle - angle_deg
+    servo_angle = servo_center_angle + angle_deg
 
     # 6. Ép giới hạn an toàn vật lý
     return int(max(0, min(180, servo_angle)))

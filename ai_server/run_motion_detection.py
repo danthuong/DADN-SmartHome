@@ -103,7 +103,7 @@ def main():
     last_published_angle = -1
 
     HOLD_TIME = 1.5
-    TOGGLE_COOLDOWN = 5
+    TOGGLE_COOLDOWN = 3
     CONFIRM_HOLD_TIME = 1.0
 
     global_cmd_cooldowns = {}
@@ -299,7 +299,7 @@ def main():
             )
             
             # Chống rung (Debounce): Chỉ gửi nếu góc thay đổi quá 5 độ
-            if abs(target_angle - last_published_angle) > 5:
+            if abs(target_angle - last_published_angle) > 10:
                 mqtt.publish("device-fan-angle", target_angle)
                 last_published_angle = target_angle
             

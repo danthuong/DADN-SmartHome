@@ -78,7 +78,7 @@ def thuky_on_message(client, feed_id, payload):
                     print(f"   -> Đã update QUẠT thành: {packed_data}")
         else:
             val = float(payload) 
-            
+            print(val)
             if feed_id == "human-detect-pir":
                 db.log_sensor("PIR", val)
                 print(f"[{time.strftime('%H:%M:%S')}] Log: PIR = {val}")
@@ -90,6 +90,39 @@ def thuky_on_message(client, feed_id, payload):
                 db.log_sensor("LIGHT", val)
                 
             elif feed_id == "human-detect-ai":
+                if (val == 0):
+                    device_id = "LED"
+                    row = db.get_shared_device_state(device_id)
+                    if row:
+                        state = json.loads(row["state_json"]) if row["state_json"] else {}
+                        new_on_state = False
+                        state["isOn"] = new_on_state
+                        db.update_shared_device_state(device_id, json.dumps(state))
+                        is_on = 1 if new_on_state else 0
+                        br = int(state.get("brightness", 50))
+                        color = int(state.get("color", 16777215)) # Trắng mặc định
+                        rgb = color & 0xFFFFFF
+                        r, g, b = (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF
+                        
+                        packed_data = f"{is_on}:{br:03d}:{r:03d}:{g:03d}:{b:03d}"
+                        mqtt.publish("device-led", packed_data)
+                        print(f"Ko có người, server tắt đèn: {packed_data}")
+                    device_id = "FAN"
+                    row = db.get_shared_device_state(device_id)
+                    if row:
+                        state = json.loads(row["state_json"]) if row["state_json"] else {}
+                        state["isOn"] = False
+                        db.update_shared_device_state(device_id, json.dumps(state))
+                        # Đóng gói cho FAN (isOn:speed:isOsc:isTracking)
+                        is_on = 1 if state.get("isOn") else 0
+                        speed = int(state.get("speed", 50))
+                        is_osc = 1 if state.get("isOscillating") else 0
+                        is_track = 1 if state.get("isTracking") else 0
+                        
+                        packed_data = f"{is_on}:{speed:03d}:{is_osc}:{is_track}"
+                        mqtt.publish("device-fan", packed_data)
+                        print(f"Ko có người, server tắt quạt: {packed_data}")
+
                 db.log_camera(camera_id="CAM_01", has_human=val) # Chú ý tên CAM_01 cho khớp DB Master data
                 print(f"[{time.strftime('%H:%M:%S')}] Log: AI Camera = {val}")
         

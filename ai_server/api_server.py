@@ -18,6 +18,7 @@ from mqtt_client import SmartHomeMQTT
 print("[API SERVER] Đang khởi tạo kết nối MQTT ngầm...")
 mqtt = SmartHomeMQTT()
 mqtt.start()
+SPEED_MAPPING = { 0: 0, 1: 33, 2: 66, 3: 100 }
 
 # TẠO INSTANCE DUY NHẤT CỦA DATABASE (CÓ RLOCK)
 from database.db_manager import DatabaseManager
@@ -169,7 +170,7 @@ def control_device(
             return str(val).lower() in ("true", "1", "yes")
 
         is_on = 1 if to_bool(state.get("isOn")) else 0
-        speed = int(state.get("speed", 0))
+        speed = SPEED_MAPPING.get(int(state.get("speed", 0)), 0)
         is_osc = 1 if to_bool(state.get("isOscillating")) else 0
         is_track = 1 if to_bool(state.get("isTracking")) else 0
         # ép speed có 3 chữ số (ví dụ 36 là thành 036)
